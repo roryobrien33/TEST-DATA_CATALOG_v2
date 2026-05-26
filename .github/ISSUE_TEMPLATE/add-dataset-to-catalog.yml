@@ -1,6 +1,6 @@
 name: Add dataset to a data catalog
-description: Submit metadata for a dataset
-title: "[Dataset] "
+description: Create a new catalog (with its allowed use cases) or add a dataset to an existing catalog by Catalog ID.
+title: "[Catalog intake] "
 labels: ["catalog-intake"]
 
 body:
@@ -8,24 +8,43 @@ body:
     id: catalog_action
     attributes:
       label: Catalog action
+      description: Choose whether you are creating a new catalog or updating an existing one.
       options:
-        - Update existing catalog
         - Create new catalog
+        - Update existing catalog
     validations:
       required: true
 
-  - type: input
-    id: catalog_id
+  - type: markdown
     attributes:
-      label: Catalog ID (slug)
-      placeholder: "german-node"
+      value: |
+        ### Important
+        - If you choose **Create new catalog**: fill **Catalog name**, **Catalog title**, **Catalog description**, and **Allowed use cases**.
+        - If you choose **Update existing catalog**: fill **Catalog ID (existing)** (this is posted by the bot when the catalog was created).
+
+  - type: input
+    id: catalog_id_existing
+    attributes:
+      label: Catalog ID (existing)
+      description: Required for "Update existing catalog". Example: EPRI-EUROPE-GERMAN-NODE-DATASETS-VOLUME-1-478N78
+      placeholder: "EPRI-EUROPE-GERMAN-NODE-DATASETS-VOLUME-1-478N78"
     validations:
-      required: true
+      required: false
+
+  - type: input
+    id: catalog_name
+    attributes:
+      label: Catalog name
+      description: Required for "Create new catalog". You can use spaces/underscores/hyphens/punctuation; the workflow generates a unique Catalog ID.
+      placeholder: "EPRI Europe - German_Node Datasets Volume-1"
+    validations:
+      required: false
 
   - type: input
     id: catalog_title
     attributes:
       label: Catalog title (required if creating a new catalog)
+      placeholder: "EPRI Europe – German Node Datasets Volume 1"
     validations:
       required: false
 
@@ -33,13 +52,34 @@ body:
     id: catalog_description
     attributes:
       label: Catalog description (required if creating a new catalog)
+      placeholder: "Describe what this catalog contains..."
     validations:
       required: false
+
+  - type: textarea
+    id: catalog_use_cases
+    attributes:
+      label: Allowed use cases for this catalog (required if creating a new catalog)
+      description: |
+        Provide a comma-separated list of allowed use cases for this catalog.
+        Examples:
+        - overload, over_voltage, under_voltage
+        - hosting capacity, voltage control, curtailment
+      placeholder: "overload, over_voltage, under_voltage"
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ## Dataset metadata
 
   - type: input
     id: dataset_title
     attributes:
       label: Dataset title
+      placeholder: "Overload scenarios – German nodes"
     validations:
       required: true
 
@@ -47,17 +87,16 @@ body:
     id: dataset_description
     attributes:
       label: Dataset description
+      placeholder: "What is in the dataset, how it was produced, what it can be used for..."
     validations:
       required: true
 
-  - type: dropdown
-    id: use_case
+  - type: input
+    id: dataset_use_case
     attributes:
-      label: Use case
-      options:
-        - overload
-        - over_voltage
-        - under_voltage
+      label: Dataset use case
+      description: Must match one of the Allowed use cases defined in the target catalog.
+      placeholder: "overload"
     validations:
       required: true
 
@@ -65,5 +104,26 @@ body:
     id: location
     attributes:
       label: Location (high-level)
+      placeholder: "Germany (high-level)"
     validations:
       required: true
+
+  - type: input
+    id: concepts
+    attributes:
+      label: Concepts / tags (optional)
+      description: Comma-separated, e.g. overload, distribution-grid
+      placeholder: "overload, distribution-grid"
+    validations:
+      required: false
+
+  - type: textarea
+    id: distributions
+    attributes:
+      label: Distribution links (optional)
+      description: One per line
+      placeholder: |
+        https://example.com/data.zip (format: zip)
+        https://example.com/readme (format: html)
+    validations:
+      required: false
