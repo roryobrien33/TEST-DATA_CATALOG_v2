@@ -48,11 +48,12 @@ body:
     validations:
       required: false
 
-  - type: textarea
-    id: catalog_description
+  - type: input
+    id: catalog_use_cases
     attributes:
-      label: Catalog description (required if creating a new catalog)
-      placeholder: "Describe what this catalog contains..."
+      label: Allowed use cases for this catalog (required if creating a new catalog)
+      description: "Comma-separated list. Example: overload, over_voltage, under_voltage"
+      placeholder: "overload, over_voltage, under_voltage"
     validations:
       required: false
 
