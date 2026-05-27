@@ -13,10 +13,15 @@ PREFIX="data-catalog/prefix.yaml"
 
 # Fail early with a clear message if paths are wrong
 [[ -f "${SCHEMA}" ]] || { echo "ERROR: schema not found: ${REPO_ROOT}/${SCHEMA}" >&2; exit 1; }
-[[ -f "${INPUT}"  ]] || { echo "ERROR: input YAML not found: ${REPO_ROOT}/${INPUT}"  >&2; exit 1; }
 [[ -f "${PREFIX}" ]] || { echo "ERROR: prefix file not found: ${REPO_ROOT}/${PREFIX}" >&2; exit 1; }
 
-# This MUST succeed, otherwise stop (so we don't generate misleading outputs)
+# NEW: merge ONLY catalogs created via issue forms (catalogs/*.yaml) into the single INPUT file
+uv run python scripts/merge-catalogs.py
+
+# Confirm the merged file exists
+[[ -f "${INPUT}"  ]] || { echo "ERROR: input YAML not found after merge: ${REPO_ROOT}/${INPUT}" >&2; exit 1; }
+
+# Convert merged YAML → TTL
 uv run linkml-convert \
   -s "${SCHEMA}" \
   -t ttl \
@@ -26,6 +31,5 @@ uv run linkml-convert \
 
 echo "OK: wrote TTL to ${REPO_ROOT}/${OUT}"
 
-# Optional: only run this AFTER LinkML succeeds
+# Generate the site artifacts (as before)
 uv run python -m simple_data_catalog_generator.create_data_catalog
-``
