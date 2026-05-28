@@ -47,44 +47,56 @@ jobs:
       - name: Install Python project dependencies
         run: uv sync --no-dev --no-install-project --locked
 
-      - name: Patch generator to skip empty theme wordcloud
+      - name: Patch generator to skip empty theme wordcloud (indent-safe)
         run: |
           set -euo pipefail
-
-          # Use the same environment as the generator (uv/.venv)
           uv run python - <<'PY'
           from pathlib import Path
-          import sys
+          import re
 
-          # Look directly inside the repo's uv venv first (most reliable)
+          # Locate installed dependency inside uv venv
           candidates = list(Path(".venv").glob("lib/python*/site-packages/simple_data_catalog_generator/analysis_functions.py"))
-
-          # Fallback: if layout differs, search under .venv for the file
           if not candidates:
-              candidates = list(Path(".venv").rglob("simple_data_catalog_generator/analysis_functions.py"))
-
+            candidates = list(Path(".venv").rglob("simple_data_catalog_generator/analysis_functions.py"))
           if not candidates:
-              raise SystemExit("ERROR: simple_data_catalog_generator/analysis_functions.py not found under .venv")
+            raise SystemExit("ERROR: simple_data_catalog_generator/analysis_functions.py not found under .venv")
 
           target = candidates[0]
           txt = target.read_text(encoding="utf-8")
 
-          # Idempotent patch
-          if "PATCH_EMPTY_WORDCLOUD_GUARD" in txt:
-              print(f"OK: patch already present in {target}")
-              sys.exit(0)
+          marker = "PATCH_EMPTY_WORDCLOUD_GUARD"
 
-          needle = "wordcloud.generate_from_frequencies(frequencies=d)"
-          if needle not in txt:
-              raise SystemExit(f"ERROR: expected line not found in {target}: {needle}")
-
-          patch = (
-              "        # PATCH_EMPTY_WORDCLOUD_GUARD\n"
-              "        if not d:\n"
-              "            return\n"
+          # Remove any previous patch blocks (good or bad indentation)
+          txt = re.sub(
+            r"(?m)^[ \t]*#\s*" + re.escape(marker) + r"\s*\n"
+            r"^[ \t]*if\s+not\s+d\s*:\s*\n"
+            r"^[ \t]*return\s*\n",
+            "",
+            txt,
           )
 
-          txt = txt.replace(needle, patch + "        " + needle)
+          needle = "wordcloud.generate_from_frequencies(frequencies=d)"
+          pos = txt.find(needle)
+          if pos == -1:
+            raise SystemExit(f"ERROR: expected line not found in {target}: {needle}")
+
+          # Determine indentation of the needle line
+          line_start = txt.rfind("\n", 0, pos) + 1
+          line_end = txt.find("\n", pos)
+          if line_end == -1:
+            line_end = len(txt)
+          needle_line = txt[line_start:line_end]
+          indent = re.match(r"^([ \t]*)", needle_line).group(1)
+
+          insert = (
+            f"{indent}# {marker}\n"
+            f"{indent}if not d:\n"
+            f"{indent}    return\n"
+          )
+
+          # Insert guard immediately before the needle line
+          txt = txt[:line_start] + insert + txt[line_start:]
+
           target.write_text(txt, encoding="utf-8")
           print(f"OK: patched {target}")
           PY
