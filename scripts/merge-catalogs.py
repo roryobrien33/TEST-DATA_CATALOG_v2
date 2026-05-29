@@ -115,7 +115,6 @@ def normalize_dataset(
     # Preserve source catalog separation inside the merged catalog
     out["inSeries"] = series_id
 
-    # Optional publisher
     publisher = ds.get("publisher")
     if isinstance(publisher, dict):
         name = first_present(publisher, ["name"], None)
@@ -219,16 +218,22 @@ def main() -> None:
                 )
             )
 
+    # IMPORTANT:
+    # dataCatalog.dataset must be a list of REFERENCES (identifiers), not inline dataset objects
+    dataset_refs = [ds["identifier"] for ds in all_datasets]
+
     container = {
         "dataCatalog": {
             "identifier": "sdcdc:USER-CATALOG",
             "title": "User Catalog",
             "description": "Aggregated datasets from data-catalog/user-catalogs/",
-            "dataset": all_datasets,
         },
         "datasets": all_datasets,
         "series": all_series,
     }
+
+    if dataset_refs:
+        container["dataCatalog"]["dataset"] = dataset_refs
 
     if concepts_map:
         container["concepts"] = sorted(
