@@ -7,4 +7,10 @@ catalog:
   - b-b
   owner: B
   contact: B
-datasets: []
+datasets:
+- id: B-BAMT77-20260529-18
+  title: BAB
+  description: nnnn
+  use_case: b-b
+  location: bb
+  created: '2026-05-29'
