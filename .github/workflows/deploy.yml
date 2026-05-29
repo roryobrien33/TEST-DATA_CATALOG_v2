@@ -1,4 +1,4 @@
-name: Build & Deploy Data Catalog
+name: Build & Deploy Data Catalog 
 
 on:
   workflow_dispatch:
