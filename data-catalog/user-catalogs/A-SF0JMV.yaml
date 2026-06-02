@@ -7,4 +7,9 @@ catalog:
   - a-a
   owner: A
   contact: A
-datasets: []
+datasets:
+- id: test
+  title: Tester
+  description: tester dataset
+  use_case: a-a
+  location: Munich, Germany
