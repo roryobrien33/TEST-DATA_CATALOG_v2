@@ -153,6 +153,7 @@ jobs:
                   f'<article class="catalog-card">'
                   f'<div class="catalog-card-body">'
                   f'<h3 class="catalog-card-title"><a href="{html.escape(href)}">{html.escape(str(catalog_title))}</a></h3>'
+                  f'<p class="catalog-card-id"><strong>Catalog ID:</strong> <code>{html.escape(str(catalog_id))}</code></p>'
                   f'<p class="catalog-card-description">{html.escape(str(catalog_description))}</p>'
                   f'</div>'
                   f'<div class="catalog-card-footer">'
@@ -239,6 +240,17 @@ jobs:
                 }}
                 .catalog-card-title a:hover {{
                   text-decoration: underline;
+                }}
+                .catalog-card-id {{
+                  margin: 0 0 0.75rem;
+                  font-size: 0.95rem;
+                  color: #333;
+                }}
+                .catalog-card-id code {{
+                  font-size: 0.9rem;
+                  background: #f1f3f5;
+                  padding: 0.15rem 0.35rem;
+                  border-radius: 4px;
                 }}
                 .catalog-card-description {{
                   margin: 0;
