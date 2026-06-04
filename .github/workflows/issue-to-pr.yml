@@ -14,7 +14,8 @@ jobs:
     if: |
       contains(github.event.issue.labels.*.name, 'catalog-create') ||
       contains(github.event.issue.labels.*.name, 'catalog-add-dataset') ||
-      contains(github.event.issue.labels.*.name, 'catalog-edit-dataset')
+      contains(github.event.issue.labels.*.name, 'catalog-edit-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-remove-dataset')
     runs-on: ubuntu-latest
 
     steps:
@@ -52,6 +53,7 @@ jobs:
             const isCreateCatalog = labels.includes("catalog-create");
             const isAddDataset = labels.includes("catalog-add-dataset");
             const isEditDataset = labels.includes("catalog-edit-dataset");
+            const isRemoveDataset = labels.includes("catalog-remove-dataset");
 
             // Create catalog fields
             const catalog_name_A = getField("Catalog name");
@@ -79,6 +81,10 @@ jobs:
             const location_C = getField("Geographical Location (high-level) (optional)");
             const concepts_C = getField("Concepts / tags (optional)");
             const distributions_C = getField("Distribution links (optional)");
+
+            // Remove dataset fields
+            const catalog_id_existing_D = getField("Catalog ID (existing)");
+            const dataset_identifier_D = getField("Dataset identifier");
 
             function normalizeIdBase(name) {
               return name
@@ -157,6 +163,11 @@ jobs:
               }
             }
 
+            if (isRemoveDataset) {
+              if (!catalog_id_existing_D) errors.push("Missing: Catalog ID (existing)");
+              if (!dataset_identifier_D) errors.push("Missing: Dataset identifier");
+            }
+
             let generated_catalog_id = "";
             if (isCreateCatalog && catalog_name_A) {
               const base = normalizeIdBase(catalog_name_A);
@@ -167,6 +178,7 @@ jobs:
             core.setOutput("is_create_catalog", String(isCreateCatalog));
             core.setOutput("is_add_dataset", String(isAddDataset));
             core.setOutput("is_edit_dataset", String(isEditDataset));
+            core.setOutput("is_remove_dataset", String(isRemoveDataset));
 
             core.setOutput("catalog_name_A", catalog_name_A);
             core.setOutput("catalog_description_A", catalog_description_A);
@@ -192,6 +204,9 @@ jobs:
             core.setOutput("location_C", location_C);
             core.setOutput("concepts_C", concepts_C);
             core.setOutput("distributions_C", distributions_C);
+
+            core.setOutput("catalog_id_existing_D", catalog_id_existing_D);
+            core.setOutput("dataset_identifier_D", dataset_identifier_D);
 
       - name: Comment and stop on validation errors
         if: ${{ fromJSON(steps.parse.outputs.errors)[0] != null }}
@@ -480,6 +495,59 @@ jobs:
           CONCEPTS: ${{ steps.parse.outputs.concepts_C }}
           DISTRIBUTIONS: ${{ steps.parse.outputs.distributions_C }}
 
+      - name: Remove dataset from catalog YAML
+        if: ${{ steps.parse.outputs.is_remove_dataset == 'true' }}
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          import pathlib
+          import yaml
+
+          catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
+          dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
+
+          p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
+          if not p.exists():
+              raise SystemExit(f"Catalog not found: {p}")
+
+          doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+          datasets = doc.get("datasets", [])
+          if datasets is None:
+              datasets = []
+          if not isinstance(datasets, list):
+              raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
+
+          def ensure_catalog_scoped_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+              s = dataset_id_value.strip()
+              if not s:
+                  return s
+              if s.startswith("http://") or s.startswith("https://"):
+                  return s
+              if ":" in s:
+                  return s
+              return f"sdcdc:{catalog_id_value}-{s}"
+
+          dataset_identifier = ensure_catalog_scoped_dataset_id(catalog_id, dataset_identifier_raw)
+
+          original_len = len(datasets)
+          datasets = [
+              ds for ds in datasets
+              if (ds.get("id") or ds.get("identifier")) != dataset_identifier
+          ]
+
+          if len(datasets) == original_len:
+              raise SystemExit(f"Dataset not found in catalog: {dataset_identifier}")
+
+          doc["datasets"] = datasets
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Removed dataset {dataset_identifier} from {catalog_id}")
+          PY
+        env:
+          CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_D }}
+          DATASET_IDENTIFIER: ${{ steps.parse.outputs.dataset_identifier_D }}
+
       - name: Comment add dataset failure details
         if: ${{ failure() && steps.parse.outputs.is_add_dataset == 'true' }}
         uses: actions/github-script@v8
@@ -504,6 +572,18 @@ jobs:
               body: "Dataset edit failed. Check the Actions logs for the exact reason."
             });
 
+      - name: Comment remove dataset failure details
+        if: ${{ failure() && steps.parse.outputs.is_remove_dataset == 'true' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: "Dataset removal failed. Check the Actions logs for the exact reason."
+            });
+
       - name: Create Pull Request
         if: ${{ success() }}
         uses: peter-evans/create-pull-request@v7
@@ -520,3 +600,4 @@ jobs:
 
             After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
           labels: "catalog-intake-pr"
+``
