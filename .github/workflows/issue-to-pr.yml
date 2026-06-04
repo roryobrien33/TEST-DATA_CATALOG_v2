@@ -2,64 +2,7 @@ name: Issue Forms to Catalog YAML to PR
 
 on:
   issues:
-    types: [opened, edited]
-
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-
-jobs:
-  intake:
-    if: |
-      contains(github.event.issue.labels.*.name, 'catalog-create') ||
-      contains(github.event.issue.labels.*.name, 'catalog-add-dataset') ||
-      contains(github.event.issue.labels.*.name, 'catalog-edit-dataset') ||
-      contains(github.event.issue.labels.*.name, 'catalog-remove-dataset')
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install PyYAML
-        run: python -m pip install --upgrade pip pyyaml
-
-      - name: Parse Issue Form fields
-        id: parse
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const body = context.payload.issue.body || "";
-
-            function escapeRegExp(s) {
-              return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            }
-
-            function getField(heading) {
-              const h = escapeRegExp(heading);
-              const re = new RegExp("###\\s+" + h + "\\s*\\n([\\s\\S]*?)(?=\\n###\\s+|$)", "i");
-              const m = body.match(re);
-              if (!m) return "";
-              return m[1].trim().replace(/^_No response_$/i, "").trim();
-            }
-
-            const labels = (context.payload.issue.labels || []).map(l => l.name);
-            const isCreateCatalog = labels.includes("catalog-create");
-            const isAddDataset = labels.includes("catalog-add-dataset");
-            const isEditDataset = labels.includes("catalog-edit-dataset");
-            const isRemoveDataset = labels.includes("catalog-remove-dataset");
-
-            // Create catalog fields
-            const catalog_name_A = getField("Catalog name");
-            const catalog_description_A = getField("Catalog description");
-            const catalog_use_cases_A = getField("Allowed use cases (comma-separated)");
-            const catalog_owner_A = getField("Catalog owner / organisation (optional)");
+    types: [opened / organisation (optional)");    types: [opened, edited]
             const catalog_contact_A = getField("Contact (optional)");
 
             // Add dataset fields
@@ -548,6 +491,14 @@ jobs:
           CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_D }}
           DATASET_IDENTIFIER: ${{ steps.parse.outputs.dataset_identifier_D }}
 
+      - name: Show pending changes
+        if: ${{ success() }}
+        run: |
+          echo "=== git status --short ==="
+          git status --short
+          echo "=== git diff --name-only ==="
+          git diff --name-only
+
       - name: Comment add dataset failure details
         if: ${{ failure() && steps.parse.outputs.is_add_dataset == 'true' }}
         uses: actions/github-script@v8
@@ -579,4 +530,82 @@ jobs:
           script: |
             await github.rest.issues.createComment({
               owner: context.repo.owner,
-              repo
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: "Dataset removal failed. Check the Actions logs for the exact reason."
+            });
+
+      - name: Create Pull Request
+        if: ${{ success() }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          add-paths: |
+            data-catalog/user-catalogs/*.yaml
+          commit-message: "Catalog intake: issue #${{ github.event.issue.number }}"
+          branch: "catalog-intake/${{ github.event.issue.number }}"
+          title: "Catalog intake: issue #${{ github.event.issue.number }}"
+          body: |
+            This PR was automatically generated from issue #${{ github.event.issue.number }}.
+
+            - Labels: `${{ join(github.event.issue.labels.*.name, ', ') }}`
+            - Generated Catalog ID (if applicable): `${{ steps.parse.outputs.generated_catalog_id }}`
+
+            After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
+          labels: "catalog-intake-pr"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  intake:
+    if: |
+      contains(github.event.issue.labels.*.name, 'catalog-create') ||
+      contains(github.event.issue.labels.*.name, 'catalog-add-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-edit-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-remove-dataset')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --upgrade pip pyyaml
+
+      - name: Parse Issue Form fields
+        id: parse
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const body = context.payload.issue.body || "";
+
+            function escapeRegExp(s) {
+              return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            }
+
+            function getField(heading) {
+              const h = escapeRegExp(heading);
+              const re = new RegExp("###\\s+" + h + "\\s*\\n([\\s\\S]*?)(?=\\n###\\s+|$)", "i");
+              const m = body.match(re);
+              if (!m) return "";
+              return m[1].trim().replace(/^_No response_$/i, "").trim();
+            }
+
+            const labels = (context.payload.issue.labels || []).map(l => l.name);
+            const isCreateCatalog = labels.includes("catalog-create");
+            const isAddDataset = labels.includes("catalog-add-dataset");
+            const isEditDataset = labels.includes("catalog-edit-dataset");
+            const isRemoveDataset = labels.includes("catalog-remove-dataset");
+
+            // Create catalog fields
+            const catalog_name_A = getField("Catalog name");
+            const catalog_description_A = getField("Catalog description");
+            const catalog_use_cases_A = getField("Allowed use cases (comma-separated)");
