@@ -1,5 +1,5 @@
 name: Remove dataset from catalog
-description: Remove an existing dataset from a catalog
+description: Remove an existing dataset from an existing catalog
 title: "[Remove Dataset] "
 labels: ["catalog-remove-dataset", "catalog-intake"]
 
@@ -8,6 +8,12 @@ body:
     attributes:
       value: |
         Use this form to remove an existing dataset from a catalog.
+
+        You must provide:
+        - the exact **Catalog ID**
+        - the exact **Dataset identifier**
+
+        This will remove the dataset from the source catalog YAML and create a pull request.
 
   - type: input
     id: catalog_id_existing
