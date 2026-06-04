@@ -1,0 +1,28 @@
+name: Remove dataset from catalog
+description: Remove an existing dataset from a catalog
+title: "[Remove Dataset]: "
+labels: ["catalog-remove-dataset"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill in the details to remove a dataset from a catalog.
+
+  - type: input
+    id: catalog_id
+    attributes:
+      label: Catalog ID (existing)
+      description: The catalog containing the dataset
+      placeholder: e.g. A-SF0JMV
+    validations:
+      required: true
+
+  - type: input
+    id: dataset_id
+    attributes:
+      label: Dataset identifier
+      description: Exact dataset ID (e.g. sdcdc:A-SF0JMV-test)
+      placeholder: sdcdc:A-SF0JMV-test
+    validations:
+      required: true
