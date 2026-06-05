@@ -1,3 +1,6 @@
+from pathlib import Path
+import yaml
+
 from rdflib import Graph, URIRef, RDF
 from rdflib.namespace import DCAT, DCTERMS
 
@@ -7,12 +10,9 @@ from simple_data_catalog_generator.page_creation_functions import (
     write_file,
     get_title,
     get_description,
-    add_to_nav,
     get_id,
     create_local_link,
 )
-import os
-import re
 
 
 def _first_literal(graph: Graph, subject: URIRef, predicates):
@@ -29,7 +29,7 @@ def _first_literal(graph: Graph, subject: URIRef, predicates):
 
 def _build_dataset_table(catalog_graph: Graph, catalog: URIRef) -> str:
     """
-    Build an AsciiDoc table listing datasets in the catalog.
+    Build an AsciiDoc table listing active datasets in the catalog.
 
     Columns:
     - Name
@@ -39,14 +39,11 @@ def _build_dataset_table(catalog_graph: Graph, catalog: URIRef) -> str:
     """
     dataset_rows = []
 
-    # The catalog links to datasets via dcat:dataset
     for dataset in catalog_graph.objects(catalog, DCAT.dataset):
         dataset_name = get_title(dataset, catalog_graph)
         dataset_id = get_id(dataset, catalog_graph)
         dataset_description = get_description(dataset, catalog_graph)
 
-        # Use case is not formally in the current schema,
-        # but try likely predicates in case it exists in the graph.
         dataset_use_case = _first_literal(
             catalog_graph,
             dataset,
@@ -56,7 +53,6 @@ def _build_dataset_table(catalog_graph: Graph, catalog: URIRef) -> str:
             ],
         )
 
-        # Make the dataset name clickable to its dataset page
         dataset_link = create_local_link(dataset, catalog_graph)
         dataset_name_display = dataset_link if dataset_link else dataset_name
 
@@ -78,20 +74,89 @@ def _build_dataset_table(catalog_graph: Graph, catalog: URIRef) -> str:
     if not dataset_rows:
         return "No datasets available.\n\n"
 
-    table_str = '|===\n'
-    table_str += '| Name | ID | Use Case | Description\n\n'
+    table_str = "|===\n"
+    table_str += "| Name | ID | Use Case | Description\n\n"
 
     for name, ds_id, use_case, description in dataset_rows:
-        table_str += f'| {name}\n'
-        table_str += f'| `{ds_id}`\n'
-        table_str += f'| {use_case}\n'
-        table_str += f'| {description}\n\n'
+        table_str += f"| {name}\n"
+        table_str += f"| `{ds_id}`\n"
+        table_str += f"| {use_case}\n"
+        table_str += f"| {description}\n\n"
 
-    table_str += '|===\n\n'
+    table_str += "|===\n\n"
     return table_str
 
 
-def create_catalog_page(catalog_graph: Graph, output_dir: str = 'modules/data-catalog/pages/'):
+def _load_all_deleted_datasets():
+    """
+    Load deleted dataset tombstones from all source user-catalog YAML files.
+    Returns a list of dicts with an added `catalog_id` field.
+    """
+    rows = []
+
+    catalog_files = sorted(Path("data-catalog/user-catalogs").glob("*.yaml")) + sorted(
+        Path("data-catalog/user-catalogs").glob("*.yml")
+    )
+
+    for yf in catalog_files:
+        doc = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
+        catalog = doc.get("catalog", {}) or {}
+        catalog_id = catalog.get("id") or catalog.get("identifier") or yf.stem
+
+        deleted_datasets = doc.get("deleted_datasets", [])
+        if deleted_datasets is None:
+            deleted_datasets = []
+
+        if not isinstance(deleted_datasets, list):
+            continue
+
+        for item in deleted_datasets:
+            if not isinstance(item, dict):
+                continue
+
+            rows.append(
+                {
+                    "catalog_id": catalog_id,
+                    "id": str(item.get("id", "")).strip(),
+                    "title": str(item.get("title", "")).strip(),
+                    "description": str(item.get("description", "")).strip(),
+                    "deleted_at": str(item.get("deleted_at", "")).strip(),
+                }
+            )
+
+    return rows
+
+
+def _build_deleted_dataset_table() -> str:
+    """
+    Build an AsciiDoc table listing deleted datasets across all source catalogs.
+    """
+    deleted_rows = _load_all_deleted_datasets()
+
+    if not deleted_rows:
+        return "No deleted datasets recorded.\n\n"
+
+    table_str = "|===\n"
+    table_str += "| Name | ID | Linked Catalog ID | Deleted at | Description\n\n"
+
+    for row in deleted_rows:
+        title = row["title"] or "Not available"
+        ds_id = row["id"] or "Not available"
+        catalog_id = row["catalog_id"] or "Not available"
+        deleted_at = row["deleted_at"] or "Not available"
+        description = row["description"] or "Not available"
+
+        table_str += f"| {title}\n"
+        table_str += f"| `{ds_id}`\n"
+        table_str += f"| `{catalog_id}`\n"
+        table_str += f"| {deleted_at}\n"
+        table_str += f"| {description}\n\n"
+
+    table_str += "|===\n\n"
+    return table_str
+
+
+def create_catalog_page(catalog_graph: Graph, output_dir: str = "modules/data-catalog/pages/"):
     adoc_str = str()
 
     catalog = None
@@ -109,7 +174,12 @@ def create_catalog_page(catalog_graph: Graph, output_dir: str = 'modules/data-ca
     # ---------------------------
     # Description
     # ---------------------------
-    adoc_str += "== Description\n\n" + get_description(catalog, catalog_graph) + "\n\n"
+    adoc_str += "== Description\n\n"
+    desc = get_description(catalog, catalog_graph)
+    if desc and desc != "None":
+        adoc_str += desc + "\n\n"
+    else:
+        adoc_str += "No description available.\n\n"
 
     # ---------------------------
     # Machine-readable link
@@ -129,10 +199,16 @@ def create_catalog_page(catalog_graph: Graph, output_dir: str = 'modules/data-ca
     ) + "\n\n"
 
     # ---------------------------
-    # Datasets table (NEW)
+    # Active dataset table
     # ---------------------------
     adoc_str += "== Datasets\n\n"
     adoc_str += _build_dataset_table(catalog_graph=catalog_graph, catalog=catalog)
+
+    # ---------------------------
+    # Deleted dataset lineage table (NEW)
+    # ---------------------------
+    adoc_str += "== Deleted datasets\n\n"
+    adoc_str += _build_deleted_dataset_table()
 
     # ---------------------------
     # Datasets by Theme
@@ -141,7 +217,7 @@ def create_catalog_page(catalog_graph: Graph, output_dir: str = 'modules/data-ca
 
     create_theme_word_cloud(
         catalog_graph=catalog_graph,
-        output_dir='modules/data-catalog/images/'
+        output_dir="modules/data-catalog/images/"
     )
     adoc_str += "image:wordcloud.svg[Theme Word Cloud]\n\n"
 
@@ -158,5 +234,5 @@ def create_catalog_page(catalog_graph: Graph, output_dir: str = 'modules/data-ca
 
 if __name__ == "__main__":
     catalog_graph = Graph()
-    catalog_graph.parse('data-catalog/data-catalog.ttl')
+    catalog_graph.parse("data-catalog/data-catalog.ttl")
     create_catalog_page(catalog_graph=catalog_graph)
