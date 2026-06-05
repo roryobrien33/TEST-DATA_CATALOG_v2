@@ -7,9 +7,9 @@ catalog:
   - a-a
   owner: A
   contact: A
-datasets:
+datasets: []
+deleted_datasets:
 - id: sdcdc:A-SF0JMV-test
   title: New_tester
   description: tester dataset
-  use_case: a-a
-  location: Munich, Germany
+  deleted_at: '2026-06-05'
