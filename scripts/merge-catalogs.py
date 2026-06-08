@@ -91,12 +91,77 @@ def build_series_from_catalog(cat: dict, source_stem: str) -> dict:
     return out
 
 
+def load_independent_concepts() -> dict:
+    """
+    Load independent concept definitions from:
+      data-catalog/concepts/*.yaml
+      data-catalog/concepts/*.yml
+
+    Expected file structure:
+      concept:
+        identifier: sdcdc:concept-voltage
+        prefLabel: Voltage
+        definition: ...
+        altLabel: ...
+        example: ...
+    """
+    concept_files = sorted(glob.glob("data-catalog/concepts/*.yaml")) + sorted(
+        glob.glob("data-catalog/concepts/*.yml")
+    )
+
+    concepts_map = {}
+    label_to_id = {}
+
+    for fp in concept_files:
+        doc = load_yaml(fp)
+        if not isinstance(doc, dict):
+            die(f"{fp} must be a YAML mapping/object.")
+
+        concept = doc.get("concept", {})
+        if concept is None:
+            concept = {}
+        if not isinstance(concept, dict):
+            die(f"{fp}: 'concept' must be a mapping/object.")
+
+        raw_id = first_present(concept, ["identifier", "id"], None)
+        if not raw_id:
+            raw_id = f"concept-{Path(fp).stem}"
+
+        cid = ensure_curie(str(raw_id))
+        pref_label = first_present(concept, ["prefLabel", "label", "title", "name"], None)
+        definition = first_present(concept, ["definition"], None)
+        alt_label = first_present(concept, ["altLabel"], None)
+        example = first_present(concept, ["example"], None)
+
+        concept_obj = {
+            "identifier": cid,
+        }
+
+        if pref_label:
+            concept_obj["prefLabel"] = str(pref_label)
+            label_to_id[str(pref_label).strip().lower()] = cid
+
+        if definition:
+            concept_obj["definition"] = str(definition)
+
+        if alt_label:
+            concept_obj["altLabel"] = str(alt_label)
+
+        if example:
+            concept_obj["example"] = str(example)
+
+        concepts_map[cid] = concept_obj
+
+    return {"concepts_map": concepts_map, "label_to_id": label_to_id}
+
+
 def normalize_dataset(
     ds: dict,
     source_catalog_stem: str,
     idx: int,
     series_id: str,
     concepts_map: dict,
+    label_to_id: dict,
 ) -> dict:
     raw_id = first_present(ds, ["identifier", "id"], None)
     if not raw_id:
@@ -107,7 +172,6 @@ def normalize_dataset(
 
     title = first_present(ds, ["title", "name"], None)
     if title:
-        # Make dataset ID visible in the rendered page
         out["title"] = f"{str(title)} [ID: {dataset_id}]"
     else:
         out["title"] = f"[ID: {dataset_id}]"
@@ -127,7 +191,7 @@ def normalize_dataset(
     elif isinstance(publisher, str) and publisher.strip():
         out["publisher"] = {"name": publisher.strip()}
 
-    # Map concepts/tags/theme into schema-supported theme + top-level concepts
+    # Map concepts/tags/theme to independent concept ids where possible
     labels = []
     labels += extract_list(ds.get("concepts"))
     labels += extract_list(ds.get("tags"))
@@ -142,11 +206,7 @@ def normalize_dataset(
                 cid = first_present(item, ["identifier", "id"], None)
                 if cid:
                     cid = ensure_curie(str(cid))
-                    concepts_map[cid] = {
-                        "identifier": cid,
-                        "prefLabel": lbl or str(cid),
-                    }
-                    labels.append(lbl or str(cid))
+                    labels.append(cid)
                 elif lbl:
                     labels.append(lbl)
     elif isinstance(theme_val, str) and theme_val.strip():
@@ -162,7 +222,27 @@ def normalize_dataset(
 
     if ordered_labels:
         theme_ids = []
+
         for lbl in ordered_labels:
+            # Case 1: already an explicit CURIE/IRI
+            if lbl.startswith("http://") or lbl.startswith("https://") or ":" in lbl:
+                cid = ensure_curie(lbl)
+                theme_ids.append(cid)
+
+                if cid not in concepts_map:
+                    concepts_map[cid] = {
+                        "identifier": cid,
+                        "prefLabel": lbl,
+                    }
+                continue
+
+            # Case 2: matches an independent concept by prefLabel
+            matched_cid = label_to_id.get(lbl.strip().lower())
+            if matched_cid:
+                theme_ids.append(matched_cid)
+                continue
+
+            # Case 3: fallback — auto-create concept from label
             cid = concept_id_from_label(lbl)
             theme_ids.append(cid)
             if cid not in concepts_map:
@@ -170,6 +250,7 @@ def normalize_dataset(
                     "identifier": cid,
                     "prefLabel": lbl,
                 }
+
         out["theme"] = theme_ids
 
     return out
@@ -185,7 +266,10 @@ def main() -> None:
 
     all_datasets = []
     all_series = []
-    concepts_map = {}
+
+    loaded_concepts = load_independent_concepts()
+    concepts_map = loaded_concepts["concepts_map"]
+    label_to_id = loaded_concepts["label_to_id"]
 
     for fp in files:
         doc = load_yaml(fp)
@@ -219,6 +303,7 @@ def main() -> None:
                     idx=i,
                     series_id=series_id,
                     concepts_map=concepts_map,
+                    label_to_id=label_to_id,
                 )
             )
 
@@ -250,9 +335,8 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print(f"OK: merged {len(files)} user catalog file(s) and {len(all_datasets)} dataset(s) into {out}")
+    print(f"OK: merged {len(files)} user catalog file(s), {len(all_datasets)} dataset(s), and {len(concepts_map)} concept(s) into {out}")
 
 
 if __name__ == "__main__":
     main()
-
