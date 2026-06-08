@@ -15,7 +15,8 @@ jobs:
       contains(github.event.issue.labels.*.name, 'catalog-create') ||
       contains(github.event.issue.labels.*.name, 'catalog-add-dataset') ||
       contains(github.event.issue.labels.*.name, 'catalog-edit-dataset') ||
-      contains(github.event.issue.labels.*.name, 'catalog-remove-dataset')
+      contains(github.event.issue.labels.*.name, 'catalog-remove-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-create-concept')
     runs-on: ubuntu-latest
 
     steps:
@@ -54,6 +55,7 @@ jobs:
             const isAddDataset = labels.includes("catalog-add-dataset");
             const isEditDataset = labels.includes("catalog-edit-dataset");
             const isRemoveDataset = labels.includes("catalog-remove-dataset");
+            const isCreateConcept = labels.includes("catalog-create-concept");
 
             // Create catalog fields
             const catalog_name_A = getField("Catalog name");
@@ -86,12 +88,28 @@ jobs:
             const catalog_id_existing_D = getField("Catalog ID (existing)");
             const dataset_identifier_D = getField("Dataset identifier");
 
+            // Create concept fields
+            const concept_pref_label_E = getField("Concept preferred label");
+            const concept_definition_E = getField("Concept definition");
+            const concept_alt_label_E = getField("Concept alternative label (optional)");
+            const concept_example_E = getField("Concept example (optional)");
+
             function normalizeIdBase(name) {
               return name
                 .trim()
                 .toUpperCase()
                 .replace(/[\s\-_]+/g, "-")
                 .replace(/[^A-Z0-9-]/g, "-")
+                .replace(/-+/g, "-")
+                .replace(/^-|-$/g, "");
+            }
+
+            function slugify(name) {
+              return name
+                .trim()
+                .toLowerCase()
+                .replace(/[\s_]+/g, "-")
+                .replace(/[^a-z0-9-]/g, "-")
                 .replace(/-+/g, "-")
                 .replace(/^-|-$/g, "");
             }
@@ -168,10 +186,20 @@ jobs:
               if (!dataset_identifier_D) errors.push("Missing: Dataset identifier");
             }
 
+            if (isCreateConcept) {
+              if (!concept_pref_label_E) errors.push("Missing: Concept preferred label");
+              if (!concept_definition_E) errors.push("Missing: Concept definition");
+            }
+
             let generated_catalog_id = "";
             if (isCreateCatalog && catalog_name_A) {
               const base = normalizeIdBase(catalog_name_A);
               generated_catalog_id = base + "-" + randomToken6();
+            }
+
+            let generated_concept_id = "";
+            if (isCreateConcept && concept_pref_label_E) {
+              generated_concept_id = "sdcdc:concept-" + slugify(concept_pref_label_E);
             }
 
             core.setOutput("errors", JSON.stringify(errors));
@@ -179,6 +207,7 @@ jobs:
             core.setOutput("is_add_dataset", String(isAddDataset));
             core.setOutput("is_edit_dataset", String(isEditDataset));
             core.setOutput("is_remove_dataset", String(isRemoveDataset));
+            core.setOutput("is_create_concept", String(isCreateConcept));
 
             core.setOutput("catalog_name_A", catalog_name_A);
             core.setOutput("catalog_description_A", catalog_description_A);
@@ -208,6 +237,12 @@ jobs:
             core.setOutput("catalog_id_existing_D", catalog_id_existing_D);
             core.setOutput("dataset_identifier_D", dataset_identifier_D);
 
+            core.setOutput("concept_pref_label_E", concept_pref_label_E);
+            core.setOutput("concept_definition_E", concept_definition_E);
+            core.setOutput("concept_alt_label_E", concept_alt_label_E);
+            core.setOutput("concept_example_E", concept_example_E);
+            core.setOutput("generated_concept_id", generated_concept_id);
+
       - name: Comment and stop on validation errors
         if: ${{ fromJSON(steps.parse.outputs.errors)[0] != null }}
         uses: actions/github-script@v8
@@ -236,6 +271,18 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
               body: "Generated Catalog ID: `${{ steps.parse.outputs.generated_catalog_id }}`"
+            });
+
+      - name: Comment generated Concept ID
+        if: ${{ steps.parse.outputs.is_create_concept == 'true' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: "Generated Concept ID: `${{ steps.parse.outputs.generated_concept_id }}`"
             });
 
       - name: Create catalog YAML
@@ -580,6 +627,69 @@ jobs:
           CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_D }}
           DATASET_IDENTIFIER: ${{ steps.parse.outputs.dataset_identifier_D }}
 
+      - name: Create concept YAML
+        if: ${{ steps.parse.outputs.is_create_concept == 'true' }}
+        run: |
+          set -euo pipefail
+          mkdir -p data-catalog/concepts
+
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import yaml
+
+          concept_id = os.environ["CONCEPT_ID"].strip()
+          concept_pref_label = os.environ["CONCEPT_PREF_LABEL"].strip()
+          concept_definition = os.environ["CONCEPT_DEFINITION"].strip()
+          concept_alt_label = os.environ.get("CONCEPT_ALT_LABEL", "").strip()
+          concept_example = os.environ.get("CONCEPT_EXAMPLE", "").strip()
+
+          def file_stem_from_id(value: str) -> str:
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
+
+          file_stem = file_stem_from_id(concept_id)
+          p = pathlib.Path(f"data-catalog/concepts/{file_stem}.yaml")
+          p.parent.mkdir(parents=True, exist_ok=True)
+
+          if p.exists():
+              raise SystemExit(f"Concept file already exists: {p}")
+
+          doc = {
+              "concept": {
+                  "identifier": concept_id,
+                  "prefLabel": concept_pref_label,
+                  "definition": concept_definition,
+              }
+          }
+
+          if concept_alt_label:
+              doc["concept"]["altLabel"] = concept_alt_label
+
+          if concept_example:
+              doc["concept"]["example"] = concept_example
+
+          p.write_text(
+              yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
+              encoding="utf-8"
+          )
+          print(f"Wrote concept file: {p}")
+          PY
+        env:
+          CONCEPT_ID: ${{ steps.parse.outputs.generated_concept_id }}
+          CONCEPT_PREF_LABEL: ${{ steps.parse.outputs.concept_pref_label_E }}
+          CONCEPT_DEFINITION: ${{ steps.parse.outputs.concept_definition_E }}
+          CONCEPT_ALT_LABEL: ${{ steps.parse.outputs.concept_alt_label_E }}
+          CONCEPT_EXAMPLE: ${{ steps.parse.outputs.concept_example_E }}
+
       - name: Show pending changes
         if: ${{ success() }}
         run: |
@@ -624,6 +734,18 @@ jobs:
               body: "Dataset removal failed. Check the Actions logs for the exact reason."
             });
 
+      - name: Comment create concept failure details
+        if: ${{ failure() && steps.parse.outputs.is_create_concept == 'true' }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: "Concept creation failed. Check the Actions logs for the exact reason."
+            });
+
       - name: Create Pull Request
         if: ${{ success() }}
         uses: peter-evans/create-pull-request@v7
@@ -631,6 +753,7 @@ jobs:
           token: ${{ github.token }}
           add-paths: |
             data-catalog/user-catalogs/*.yaml
+            data-catalog/concepts/*.yaml
           commit-message: "Catalog intake: issue #${{ github.event.issue.number }}"
           branch: "catalog-intake/${{ github.event.issue.number }}"
           title: "Catalog intake: issue #${{ github.event.issue.number }}"
@@ -639,6 +762,7 @@ jobs:
 
             - Labels: `${{ join(github.event.issue.labels.*.name, ', ') }}`
             - Generated Catalog ID (if applicable): `${{ steps.parse.outputs.generated_catalog_id }}`
+            - Generated Concept ID (if applicable): `${{ steps.parse.outputs.generated_concept_id }}`
 
             After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
           labels: "catalog-intake-pr"
