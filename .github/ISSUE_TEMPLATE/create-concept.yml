@@ -67,7 +67,7 @@ body:
       label: Relationship type
       description: "Select the hierarchy role of this concept."
       options:
-        - None
+        - No relationship
         - Child concept
         - Parent concept
       default: 0
