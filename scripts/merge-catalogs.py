@@ -97,13 +97,9 @@ def load_independent_concepts() -> dict:
       data-catalog/concepts/*.yaml
       data-catalog/concepts/*.yml
 
-    Expected file structure:
-      concept:
-        identifier: sdcdc:concept-voltage
-        prefLabel: Voltage
-        definition: ...
-        altLabel: ...
-        example: ...
+    Concept hierarchy fields (broader/narrower) are kept in source YAML and
+    rendered from there later; they are not merged into the LinkML container
+    because the current schema does not formally define them.
     """
     concept_files = sorted(glob.glob("data-catalog/concepts/*.yaml")) + sorted(
         glob.glob("data-catalog/concepts/*.yml")
@@ -178,9 +174,8 @@ def normalize_dataset(
 
     desc = first_present(ds, ["description"], None)
     if desc:
-        out["description"] = str(desc)
+      out["description"] = str(desc)
 
-    # Preserve source catalog separation inside the merged catalog
     out["inSeries"] = series_id
 
     publisher = ds.get("publisher")
@@ -191,7 +186,6 @@ def normalize_dataset(
     elif isinstance(publisher, str) and publisher.strip():
         out["publisher"] = {"name": publisher.strip()}
 
-    # Map concepts/tags/theme to independent concept ids where possible
     labels = []
     labels += extract_list(ds.get("concepts"))
     labels += extract_list(ds.get("tags"))
@@ -224,7 +218,6 @@ def normalize_dataset(
         theme_ids = []
 
         for lbl in ordered_labels:
-            # Case 1: already an explicit CURIE/IRI
             if lbl.startswith("http://") or lbl.startswith("https://") or ":" in lbl:
                 cid = ensure_curie(lbl)
                 theme_ids.append(cid)
@@ -236,13 +229,11 @@ def normalize_dataset(
                     }
                 continue
 
-            # Case 2: matches an independent concept by prefLabel
             matched_cid = label_to_id.get(lbl.strip().lower())
             if matched_cid:
                 theme_ids.append(matched_cid)
                 continue
 
-            # Case 3: fallback — auto-create concept from label
             cid = concept_id_from_label(lbl)
             theme_ids.append(cid)
             if cid not in concepts_map:
@@ -335,7 +326,10 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print(f"OK: merged {len(files)} user catalog file(s), {len(all_datasets)} dataset(s), and {len(concepts_map)} concept(s) into {out}")
+    print(
+        f"OK: merged {len(files)} user catalog file(s), "
+        f"{len(all_datasets)} dataset(s), and {len(concepts_map)} concept(s) into {out}"
+    )
 
 
 if __name__ == "__main__":
