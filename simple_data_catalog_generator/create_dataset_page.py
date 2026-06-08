@@ -1,4 +1,4 @@
-from rdflib import Graph, URIRef, DCAT, RDF, DCTERMS, Namespace
+from rdflib import Graph, URIRef, DCAT, DCTERMS, Namespace
 from simple_data_catalog_generator.page_creation_functions import (
     write_file,
     get_title,
@@ -8,16 +8,11 @@ from simple_data_catalog_generator.page_creation_functions import (
 )
 from simple_data_catalog_generator.create_distribution_table import create_distribution_table
 
-# Existing namespaces already used elsewhere
 DQV = Namespace("http://www.w3.org/ns/dqv#")
 SDCDC = Namespace("https://www.uuidea.eu/profiles/data-catalog/")
 
 
 def _first_literal(graph: Graph, subject: URIRef, predicates):
-    """
-    Return the first non-empty literal/object value found for the given subject
-    across the supplied predicate list.
-    """
     for pred in predicates:
         val = graph.value(subject, pred)
         if val is not None and str(val).strip() and str(val).strip() != "None":
@@ -25,17 +20,43 @@ def _first_literal(graph: Graph, subject: URIRef, predicates):
     return ""
 
 
+def _linked_concepts_table(dataset: URIRef, catalog_graph: Graph) -> str:
+    rows = []
+
+    for concept in catalog_graph.objects(dataset, DCAT.theme):
+        concept_name = get_title(concept, catalog_graph)
+        if not concept_name or concept_name == "None":
+            # For concepts, title may be absent; fall back to id
+            concept_name = get_id(concept, catalog_graph)
+
+        concept_id = get_id(concept, catalog_graph)
+        concept_link = create_local_link(concept, catalog_graph)
+        concept_name_display = concept_link if concept_link else concept_name
+        rows.append((concept_name.lower(), concept_name_display, concept_id))
+
+    if not rows:
+        return "No linked concepts.\n\n"
+
+    rows.sort(key=lambda x: x[0])
+
+    table_str = "|===\n"
+    table_str += "| Concept | ID\n\n"
+
+    for _, concept_name_display, concept_id in rows:
+        table_str += f"| {concept_name_display}\n"
+        table_str += f"| `{concept_id}`\n\n"
+
+    table_str += "|===\n\n"
+    return table_str
+
+
 def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     adoc_str = str()
 
-    # ---------------------------
-    # Core values
-    # ---------------------------
     dataset_name = get_title(dataset, catalog_graph)
     dataset_id = get_id(dataset, catalog_graph)
     dataset_description = get_description(subject=dataset, graph=catalog_graph)
 
-    # Linked Catalog ID (represented in your current architecture via inSeries)
     linked_series = catalog_graph.value(dataset, DCAT.inSeries)
     linked_catalog_id = ""
     linked_catalog_link = ""
@@ -43,10 +64,6 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
         linked_catalog_id = get_id(linked_series, catalog_graph)
         linked_catalog_link = create_local_link(linked_series, catalog_graph)
 
-    # Use case
-    # Your current schema does not formally define a dataset use_case slot,
-    # but we try a few likely predicates so this page can display it if/when
-    # it is present in the graph.
     dataset_use_case = _first_literal(
         catalog_graph,
         dataset,
@@ -58,23 +75,10 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
         ],
     )
 
-    # Linked Concepts (themes)
-    linked_concepts = [
-        create_local_link(theme, catalog_graph)
-        for theme in catalog_graph.objects(dataset, DCAT.theme)
-    ]
-
-    # Distributions
     distributions = list(catalog_graph.objects(dataset, DCAT.distribution))
 
-    # ---------------------------
-    # Page title
-    # ---------------------------
     adoc_str += "= " + dataset_name + "\n\n"
 
-    # ---------------------------
-    # Dataset summary
-    # ---------------------------
     adoc_str += "== Dataset Details\n\n"
     adoc_str += f"* **Name:** {dataset_name}\n"
     adoc_str += f"* **ID:** `{dataset_id}`\n"
@@ -96,13 +100,6 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "* **Use case:** Not available\n"
 
-    if linked_concepts:
-        adoc_str += "* **Linked Concepts:**\n"
-        for concept_link in linked_concepts:
-            adoc_str += f"** {concept_link}\n"
-    else:
-        adoc_str += "* **Linked Concepts:** None\n"
-
     if distributions:
         adoc_str += f"* **Distributions:** {len(distributions)} available (see section below)\n"
     else:
@@ -110,27 +107,15 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
 
     adoc_str += "\n"
 
-    # ---------------------------
-    # Description section
-    # ---------------------------
     adoc_str += "== Description\n\n"
     if dataset_description and dataset_description != "None":
         adoc_str += dataset_description + "\n\n"
     else:
         adoc_str += "No description available.\n\n"
 
-    # ---------------------------
-    # Linked Concepts section
-    # ---------------------------
     adoc_str += "== Linked Concepts\n\n"
-    if linked_concepts:
-        adoc_str += "\n".join(linked_concepts) + "\n\n"
-    else:
-        adoc_str += "No linked concepts.\n\n"
+    adoc_str += _linked_concepts_table(dataset=dataset, catalog_graph=catalog_graph)
 
-    # ---------------------------
-    # Distributions section
-    # ---------------------------
     adoc_str += "== Distributions\n\n"
     if distributions:
         adoc_str += create_distribution_table(dataset=dataset, catalog_graph=catalog_graph)
@@ -138,10 +123,6 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No distributions available.\n\n"
 
-    # ---------------------------
-    # Optional metadata overview
-    # Keep this if you still want the generic table
-    # ---------------------------
     adoc_str += "== Overview\n\n"
     adoc_str += (
         f"|===\n"
@@ -153,9 +134,6 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
         f"|===\n\n"
     )
 
-    # ---------------------------
-    # Write file
-    # ---------------------------
     write_file(
         adoc_str=adoc_str,
         resource=dataset,
