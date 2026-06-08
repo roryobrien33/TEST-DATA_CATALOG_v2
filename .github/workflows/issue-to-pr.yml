@@ -60,16 +60,6 @@ jobs:
                 .replace(/^-|-$/g, "");
             }
 
-            function slugify(name) {
-              return name
-                .trim()
-                .toLowerCase()
-                .replace(/[\s_]+/g, "-")
-                .replace(/[^a-z0-9-]/g, "-")
-                .replace(/-+/g, "-")
-                .replace(/^-|-$/g, "");
-            }
-
             function randomToken6() {
               const n = Math.floor(Math.random() * (36 ** 6));
               return n.toString(36).toUpperCase().padStart(6, "0");
@@ -93,20 +83,19 @@ jobs:
                 .filter(Boolean);
             }
 
-            function normalizeConceptId(raw, catalogId = "") {
+            function normalizeConceptId(raw) {
               const s = (raw || "").trim();
               if (!s) return "";
               if (s.startsWith("http://") || s.startsWith("https://")) return s;
               if (s.includes(":")) return s;
-              if (catalogId && s.startsWith("concept-")) return `sdcdc:${catalogId}-${s}`;
               return `sdcdc:${s}`;
             }
 
-            function parseIdCsv(raw, catalogId = "") {
+            function parseConceptIdCsv(raw) {
               if (!raw) return [];
               return raw
                 .split(",")
-                .map(x => normalizeConceptId(x, catalogId))
+                .map(x => normalizeConceptId(x))
                 .filter(Boolean);
             }
 
@@ -149,13 +138,14 @@ jobs:
             const dataset_identifier_D = getField("Dataset identifier");
 
             // Create concept fields
-            const catalog_id_existing_E = getField("Catalog ID (existing)");
+            const concept_id_E = getField("Concept ID");
             const concept_pref_label_E = getField("Concept preferred label");
             const concept_definition_E = getField("Concept definition");
             const concept_alt_label_E = getField("Concept alternative label (optional)");
             const concept_example_E = getField("Concept example (optional)");
-            const broader_concept_id_E = getField("Broader concept ID (optional)");
-            const narrower_concept_ids_E = getField("Narrower concept IDs (optional)");
+            const relationship_type_E = getField("Relationship type");
+            const parent_concept_id_E = getField("Parent concept ID (required if child concept)");
+            const child_concept_ids_E = getField("Child concept IDs (optional if parent concept)");
 
             const errors = [];
 
@@ -207,9 +197,15 @@ jobs:
             }
 
             if (isCreateConcept) {
-              if (!catalog_id_existing_E) errors.push("Missing: Catalog ID (existing)");
+              if (!concept_id_E) errors.push("Missing: Concept ID");
               if (!concept_pref_label_E) errors.push("Missing: Concept preferred label");
               if (!concept_definition_E) errors.push("Missing: Concept definition");
+
+              const rel = (relationship_type_E || "").trim().toLowerCase();
+
+              if (rel === "child concept" && !parent_concept_id_E) {
+                errors.push("Missing: Parent concept ID (required if Relationship type = Child concept)");
+              }
             }
 
             let generated_catalog_id = "";
@@ -218,13 +214,9 @@ jobs:
               generated_catalog_id = base + "-" + randomToken6();
             }
 
-            let generated_concept_id = "";
-            if (isCreateConcept && catalog_id_existing_E && concept_pref_label_E) {
-              generated_concept_id = `sdcdc:${catalog_id_existing_E}-concept-${slugify(concept_pref_label_E)}`;
-            }
-
-            const normalized_broader_concept_id_E = normalizeConceptId(broader_concept_id_E, catalog_id_existing_E);
-            const normalized_narrower_concept_ids_E = parseIdCsv(narrower_concept_ids_E, catalog_id_existing_E);
+            const normalized_concept_id_E = normalizeConceptId(concept_id_E);
+            const normalized_parent_concept_id_E = normalizeConceptId(parent_concept_id_E);
+            const normalized_child_concept_ids_E = parseConceptIdCsv(child_concept_ids_E);
 
             core.setOutput("errors", JSON.stringify(errors));
             core.setOutput("is_create_catalog", String(isCreateCatalog));
@@ -261,14 +253,14 @@ jobs:
             core.setOutput("catalog_id_existing_D", catalog_id_existing_D);
             core.setOutput("dataset_identifier_D", dataset_identifier_D);
 
-            core.setOutput("catalog_id_existing_E", catalog_id_existing_E);
+            core.setOutput("concept_id_E", normalized_concept_id_E);
             core.setOutput("concept_pref_label_E", concept_pref_label_E);
             core.setOutput("concept_definition_E", concept_definition_E);
             core.setOutput("concept_alt_label_E", concept_alt_label_E);
             core.setOutput("concept_example_E", concept_example_E);
-            core.setOutput("broader_concept_id_E", normalized_broader_concept_id_E);
-            core.setOutput("narrower_concept_ids_E", JSON.stringify(normalized_narrower_concept_ids_E));
-            core.setOutput("generated_concept_id", generated_concept_id);
+            core.setOutput("relationship_type_E", relationship_type_E);
+            core.setOutput("parent_concept_id_E", normalized_parent_concept_id_E);
+            core.setOutput("child_concept_ids_E", JSON.stringify(normalized_child_concept_ids_E));
 
       - name: Comment and stop on validation errors
         if: ${{ fromJSON(steps.parse.outputs.errors)[0] != null }}
@@ -300,7 +292,7 @@ jobs:
               body: "Generated Catalog ID: `${{ steps.parse.outputs.generated_catalog_id }}`"
             });
 
-      - name: Comment generated Concept ID
+      - name: Comment concept ID
         if: ${{ steps.parse.outputs.is_create_concept == 'true' }}
         uses: actions/github-script@v8
         with:
@@ -309,7 +301,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: "Generated Concept ID: `${{ steps.parse.outputs.generated_concept_id }}`"
+              body: "Concept ID: `${{ steps.parse.outputs.concept_id_E }}`"
             });
 
       - name: Create catalog YAML
@@ -672,8 +664,9 @@ jobs:
           concept_definition = os.environ["CONCEPT_DEFINITION"].strip()
           concept_alt_label = os.environ.get("CONCEPT_ALT_LABEL", "").strip()
           concept_example = os.environ.get("CONCEPT_EXAMPLE", "").strip()
-          broader_concept_id = os.environ.get("BROADER_CONCEPT_ID", "").strip()
-          narrower_concept_ids = json.loads(os.environ.get("NARROWER_CONCEPT_IDS", "[]"))
+          relationship_type = os.environ.get("RELATIONSHIP_TYPE", "").strip().lower()
+          parent_concept_id = os.environ.get("PARENT_CONCEPT_ID", "").strip()
+          child_concept_ids = json.loads(os.environ.get("CHILD_CONCEPT_IDS", "[]"))
 
           def file_stem_from_id(value: str) -> str:
               s = value.strip()
@@ -707,11 +700,11 @@ jobs:
           if concept_example:
               doc["concept"]["example"] = concept_example
 
-          if broader_concept_id:
-              doc["concept"]["broader"] = broader_concept_id
+          if relationship_type == "child concept" and parent_concept_id:
+              doc["concept"]["broader"] = parent_concept_id
 
-          if narrower_concept_ids:
-              doc["concept"]["narrower"] = narrower_concept_ids
+          if relationship_type == "parent concept" and child_concept_ids:
+              doc["concept"]["narrower"] = child_concept_ids
 
           p.write_text(
               yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
@@ -720,13 +713,14 @@ jobs:
           print(f"Wrote concept file: {p}")
           PY
         env:
-          CONCEPT_ID: ${{ steps.parse.outputs.generated_concept_id }}
+          CONCEPT_ID: ${{ steps.parse.outputs.concept_id_E }}
           CONCEPT_PREF_LABEL: ${{ steps.parse.outputs.concept_pref_label_E }}
           CONCEPT_DEFINITION: ${{ steps.parse.outputs.concept_definition_E }}
           CONCEPT_ALT_LABEL: ${{ steps.parse.outputs.concept_alt_label_E }}
           CONCEPT_EXAMPLE: ${{ steps.parse.outputs.concept_example_E }}
-          BROADER_CONCEPT_ID: ${{ steps.parse.outputs.broader_concept_id_E }}
-          NARROWER_CONCEPT_IDS: ${{ steps.parse.outputs.narrower_concept_ids_E }}
+          RELATIONSHIP_TYPE: ${{ steps.parse.outputs.relationship_type_E }}
+          PARENT_CONCEPT_ID: ${{ steps.parse.outputs.parent_concept_id_E }}
+          CHILD_CONCEPT_IDS: ${{ steps.parse.outputs.child_concept_ids_E }}
 
       - name: Show pending changes
         if: ${{ success() }}
@@ -800,7 +794,7 @@ jobs:
 
             - Labels: `${{ join(github.event.issue.labels.*.name, ', ') }}`
             - Generated Catalog ID (if applicable): `${{ steps.parse.outputs.generated_catalog_id }}`
-            - Generated Concept ID (if applicable): `${{ steps.parse.outputs.generated_concept_id }}`
+            - Concept ID (if applicable): `${{ steps.parse.outputs.concept_id_E }}`
 
             After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
           labels: "catalog-intake-pr"
