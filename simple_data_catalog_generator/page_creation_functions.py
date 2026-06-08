@@ -1,187 +1,209 @@
-import pydantic
-from rdflib import Graph, URIRef, RDF, DCAT, DCTERMS, SKOS, Namespace
-
-from pydantic import BaseModel, Field
-from typing import List, Optional
-
-# from create_metadata_table import create_metadata_table
-
 import os
 import re
+from pathlib import Path
+
+import yaml
+from rdflib import Graph, URIRef, RDF, DCAT, DCTERMS, SKOS, Namespace
+
 DQV = Namespace("http://www.w3.org/ns/dqv#")
-ADMS= Namespace("http://www.w3.org/ns/adms#")
+ADMS = Namespace("http://www.w3.org/ns/adms#")
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
 
+def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
+    resource_id = get_id(resource=resource, catalog_graph=catalog_graph)
+    rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
 
-def create_local_link(resource: URIRef, catalog_graph: Graph)->str:
-
-    id= get_id(resource=resource, catalog_graph=catalog_graph)
-
-    rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type) 
-
-    if rdf_type== DCAT.Dataset:
-        title= get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:dataset:{id}.adoc[{title}]"
-    elif rdf_type== SKOS.Concept:
-        pref_label=get_prefLabel(subject=resource, graph=catalog_graph)
-        local_link= f"xref:concept:{id}.adoc[{pref_label}]"
-    elif rdf_type== DQV.Metric:
-        pref_label=get_prefLabel(subject=resource, graph=catalog_graph)        
-        local_link= f"xref:metric:{id}.adoc[{pref_label}]"
-    elif rdf_type== DCAT.DataService:
-        title= get_title(subject=resource, graph=catalog_graph)       
-        local_link= f"xref:dataservice:{id}.adoc[{title}]"  
-    elif rdf_type== DCAT.DatasetSeries:
-        title= get_title(subject=resource, graph=catalog_graph)       
-        local_link= f"xref:dataset-series:{id}.adoc[{title}]"  
-    elif rdf_type== DCAT.Catalog:
-        title= get_title(subject=resource, graph=catalog_graph)       
-        local_link= f"xref:data-catalog:{id}.adoc[{title}]"  
-    elif rdf_type== ODRL.Policy:
-        title= get_title(subject=resource, graph=catalog_graph)       
-        local_link= f"xref:policy:{id}.adoc[{title}]"      
+    if rdf_type == DCAT.Dataset:
+        title = get_title(subject=resource, graph=catalog_graph)
+        local_link = f"xref:dataset:{resource_id}.adoc[{title}]"
+    elif rdf_type == SKOS.Concept:
+        pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
+        local_link = f"xref:concept:{resource_id}.adoc[{pref_label}]"
+    elif rdf_type == DQV.Metric:
+        pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
+        local_link = f"xref:metric:{resource_id}.adoc[{pref_label}]"
+    elif rdf_type == DCAT.DataService:
+        title = get_title(subject=resource, graph=catalog_graph)
+        local_link = f"xref:dataservice:{resource_id}.adoc[{title}]"
+    elif rdf_type == DCAT.DatasetSeries:
+        title = get_title(subject=resource, graph=catalog_graph)
+        local_link = f"xref:dataset-series:{resource_id}.adoc[{title}]"
+    elif rdf_type == DCAT.Catalog:
+        title = get_title(subject=resource, graph=catalog_graph)
+        local_link = f"xref:data-catalog:{resource_id}.adoc[{title}]"
+    elif rdf_type == ODRL.Policy:
+        title = get_title(subject=resource, graph=catalog_graph)
+        local_link = f"xref:policy:{resource_id}.adoc[{title}]"
     else:
-        local_link=""                
-    
+        local_link = ""
 
     return local_link
 
 
-def write_file(adoc_str:str, resource: URIRef, output_dir: str, catalog_graph: Graph)->str:
-    ## create filename after uri, handle most common prefix separators
+def write_file(adoc_str: str, resource: URIRef, output_dir: str, catalog_graph: Graph) -> None:
+    file_name = get_id(resource=resource, catalog_graph=catalog_graph)
+    output_path = os.path.join(output_dir, file_name + ".adoc")
 
-    file_name= get_id(resource=resource, catalog_graph=catalog_graph)
-    print(output_dir)
-    output_path = os.path.join(output_dir, file_name+'.adoc')
-    # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, 'w') as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write(adoc_str)
-    add_to_nav(output_dir = output_dir, file_name=file_name, resource=resource, catalog_graph=catalog_graph)
 
-def get_prefLabel(subject: URIRef, graph: Graph)->str:
-    prefLabel= str(graph.value(subject,SKOS.prefLabel))
+    add_to_nav(
+        output_dir=output_dir,
+        file_name=file_name,
+        resource=resource,
+        catalog_graph=catalog_graph,
+    )
 
-    return prefLabel
 
-def get_altLabel(subject: URIRef, graph: Graph)->str:
-    altLabel= str(graph.value(subject,SKOS.altLabel))
-    
-    return altLabel
+def get_prefLabel(subject: URIRef, graph: Graph) -> str:
+    pref_label = str(graph.value(subject, SKOS.prefLabel))
+    return pref_label
 
-def get_definition(subject: URIRef, graph: Graph)->str:
-    definition= str(graph.value(subject,SKOS.definition))
-    print(definition)
+
+def get_altLabel(subject: URIRef, graph: Graph) -> str:
+    alt_label = str(graph.value(subject, SKOS.altLabel))
+    return alt_label
+
+
+def get_definition(subject: URIRef, graph: Graph) -> str:
+    definition = str(graph.value(subject, SKOS.definition))
     return definition
-    
-def get_title(subject: URIRef, graph: Graph)->str:
-    title= graph.value(subject,DCTERMS.title)
 
-    title_str=str(title)
 
-    if title_str == 'None':
-            if '#' in str(i):
-                title_str = str(i).split("#")[1]
-            elif '/' in str(i):
-                title_str = str(i).split("/")[-1]                
-            else:
-                title_str=re.sub(r'.*?\/', '/',str(i)).replace("/","")   
+def get_title(subject: URIRef, graph: Graph) -> str:
+    title = graph.value(subject, DCTERMS.title)
+    title_str = str(title)
+
+    if title_str == "None" or not title_str.strip():
+        subject_str = str(subject)
+        if "#" in subject_str:
+            title_str = subject_str.split("#")[1]
+        elif "/" in subject_str:
+            title_str = subject_str.rstrip("/").split("/")[-1]
+        else:
+            title_str = re.sub(r".*?\/", "/", subject_str).replace("/", "")
+
     return title_str
 
-def get_status(subject: URIRef, graph: Graph)->str:
-    title= graph.value(subject,ADMS.status)
 
-    title_str=str(title)
+def get_status(subject: URIRef, graph: Graph) -> str:
+    title = graph.value(subject, ADMS.status)
+    title_str = str(title)
     return title_str
 
-def get_description(subject: URIRef, graph: Graph) ->str:
-    description = graph.value(subject,DCTERMS.description)
 
-    description_str=str(description)
-    
+def get_description(subject: URIRef, graph: Graph) -> str:
+    description = graph.value(subject, DCTERMS.description)
+    description_str = str(description)
     return description_str
 
 
-def get_id(
-    resource: URIRef,
-    catalog_graph: Graph,
-) -> str:
+def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
     """
-    Extract a unique identifier for an RDF resource from its graph.
+    Fallback for concept identifiers when dcterms:identifier is not present
+    in the RDF graph.
 
-    This function attempts to retrieve a persistent identifier via the
-    `DCTERMS.identifier` property. If no identifier is found, it falls back
-    to generating one based on the resource's URI.
+    Tries to map the generated/fallback resource URI back to a source concept
+    YAML file in data-catalog/concepts/ and read concept.identifier from there.
+    """
+    resource_str = str(resource)
+    candidate_names = []
 
-    The generation strategy depends on whether the URI contains a fragment
-    identifier (`#`). If present, everything after the first '#' is used.
-    Otherwise, the function normalizes the URI by:
+    if "#" in resource_str:
+        candidate_names.append(resource_str.split("#")[-1])
+    if "/" in resource_str:
+        candidate_names.append(resource_str.rstrip("/").split("/")[-1])
 
-      1. Stripping any leading path components (e.g., `http://example.org/`)
-         using regex substitution to capture just the final segment
-      2. Removing all slashes from that segment
+    # common generated names like data-catalogconcept-voltage
+    expanded = []
+    for name in candidate_names:
+        expanded.append(name)
 
-    This approach aims for deterministic identifiers while providing a way
-    to create them when none are explicitly stated in the graph.
+        if name.startswith("data-catalog"):
+            expanded.append(name.replace("data-catalog", "", 1).lstrip("-_/"))
 
-    Args:
-        resource: The RDF resource (URIRef) for which an identifier is required
-        catalog_graph: Graph containing RDF statements about resources
+        if name.startswith("concept-"):
+            expanded.append(name)
 
-    Returns:
-        A string representing the unique identifier, suitable for use as part of
-        a page name or link target.a
+        if "concept-" in name:
+            expanded.append(name[name.find("concept-"):])
+
+    seen = set()
+    final_candidates = []
+    for c in expanded:
+        c = str(c).strip()
+        if c and c not in seen:
+            seen.add(c)
+            final_candidates.append(c)
+
+    for name in final_candidates:
+        for ext in (".yaml", ".yml"):
+            path = Path(f"data-catalog/concepts/{name}{ext}")
+            if path.exists():
+                doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                concept = doc.get("concept", {}) or {}
+                identifier = str(concept.get("identifier", "")).strip()
+                if identifier:
+                    return identifier
+
+    return ""
+
+
+def get_id(resource: URIRef, catalog_graph: Graph) -> str:
+    """
+    Extract a unique identifier for an RDF resource.
+
+    Priority:
+    1. dcterms:identifier from RDF graph
+    2. Source concept YAML fallback for SKOS concepts
+    3. URI-derived fallback
     """
     identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
-    if identifier == "None":
-        if "#" in str(resource):
-            identifier = str(resource).split("#")[1]
-        elif "/" in str(resource):
-            identifier = str(resource).split("/")[-1]            
-        else:
-            # Normalization fallback: use final path segment without slashes
-            identifier = re.sub(r".*?\/", "/", str(resource)).replace("/", "")
+    if identifier != "None" and identifier.strip():
+        return identifier.strip()
+
+    rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
+
+    if rdf_type == SKOS.Concept:
+        concept_identifier = _concept_identifier_from_source_yaml(resource)
+        if concept_identifier:
+            return concept_identifier
+
+    resource_str = str(resource)
+
+    if "#" in resource_str:
+        identifier = resource_str.split("#")[1]
+    elif "/" in resource_str:
+        identifier = resource_str.rstrip("/").split("/")[-1]
+    else:
+        identifier = re.sub(r".*?\/", "/", resource_str).replace("/", "")
+
     return identifier
 
 
 def add_to_nav(file_name: str, output_dir: str, resource: URIRef, catalog_graph: Graph):
-    # print(output_dir)
-    """Add a new page to the navigation file (nav.adoc)"""
-    # Determine the relative path for the nav entry
-    # Assuming the structure: modules/Dataset/pages/...
+    name = create_local_link(resource=resource, catalog_graph=catalog_graph) + "\n\n"
 
-    name= create_local_link(resource=resource, catalog_graph=catalog_graph) + "\n\n"
-
-    if 'modules/data-catalog/pages/' == output_dir:  
-        nav_entry = f"* {name}" 
-
-    else :
-        # Extract the dataset name from the path
+    if output_dir == "modules/data-catalog/pages/":
+        nav_entry = f"* {name}"
+    else:
         nav_entry = f"*** {name}"
 
-    nav_file_path = 'modules/data-catalog/nav.adoc'
-    
+    nav_file_path = "modules/data-catalog/nav.adoc"
+
     try:
-        # # Read the existing content
-        # with open(nav_file_path, 'r') as f:
-        #     content = f.read()
-        
-
-        with open(nav_file_path, 'a') as f:
-                f.write(nav_entry)
-        
-
+        with open(nav_file_path, "a", encoding="utf-8") as f:
+            f.write(nav_entry)
     except FileNotFoundError:
-        ...
+        pass
 
-            
 
 def create_nav_header(page_type: str):
+    nav_file_path = "modules/data-catalog/nav.adoc"
+    nav_header = f"** {page_type} \n\n"
 
-    nav_file_path = 'modules/data-catalog/nav.adoc'
-    nav_header= f"** {page_type} \n\n"
-
-    with open(nav_file_path, 'a') as f:
+    with open(nav_file_path, "a", encoding="utf-8") as f:
         f.write(nav_header)
-
+``
