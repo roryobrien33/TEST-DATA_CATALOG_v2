@@ -12,33 +12,25 @@ from simple_data_catalog_generator.page_creation_functions import (
 from simple_data_catalog_generator.create_metadata_table import create_metadata_table
 
 
-def _candidate_series_names(raw_id: str):
-    """
-    Given a series/catalog identifier, return possible source YAML base names
-    that might correspond to the user-catalog file.
-
-    Examples:
-      sdcdc:A-SF0JMV -> ["sdcdc:A-SF0JMV", "A-SF0JMV"]
-      https://.../A-SF0JMV -> ["https://.../A-SF0JMV", "A-SF0JMV"]
-    """
+def _candidate_series_names(raw_id: str, title: str):
     candidates = []
 
-    if not raw_id:
-        return candidates
+    if raw_id:
+        raw_id = str(raw_id).strip()
+        candidates.append(raw_id)
 
-    raw_id = str(raw_id).strip()
-    candidates.append(raw_id)
+        if ":" in raw_id:
+            candidates.append(raw_id.split(":", 1)[1])
 
-    if ":" in raw_id:
-        candidates.append(raw_id.split(":", 1)[1])
+        if "/" in raw_id:
+            candidates.append(raw_id.rstrip("/").split("/")[-1])
 
-    if "/" in raw_id:
-        candidates.append(raw_id.rstrip("/").split("/")[-1])
+        if "#" in raw_id:
+            candidates.append(raw_id.split("#")[-1])
 
-    if "#" in raw_id:
-        candidates.append(raw_id.split("#")[-1])
+    if title:
+        candidates.append(str(title).strip())
 
-    # de-duplicate while preserving order
     seen = set()
     cleaned = []
     for c in candidates:
@@ -52,16 +44,18 @@ def _candidate_series_names(raw_id: str):
 
 def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
     """
-    Load deleted dataset tombstones from the source user-catalog YAML file
-    that corresponds to this series/catalog.
+    Load deleted dataset tombstones from the matching source user-catalog YAML.
 
-    Expected source file patterns:
-      data-catalog/user-catalogs/<series-id>.yaml
-      data-catalog/user-catalogs/<series-id>.yml
+    Matching strategy:
+    1. Try candidate filenames derived from the series id/title
+    2. If that fails, scan all user-catalog YAML files and match on catalog.id
+    3. If that fails, match on catalog.title
     """
     raw_series_id = get_id(series, catalog_graph)
-    candidate_names = _candidate_series_names(raw_series_id)
+    series_title = get_title(series, catalog_graph)
+    candidate_names = _candidate_series_names(raw_series_id, series_title)
 
+    # First try direct filename matches
     source_file = None
     for name in candidate_names:
         for ext in (".yaml", ".yml"):
@@ -72,8 +66,28 @@ def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
         if source_file is not None:
             break
 
+    # If not found, scan all user-catalog files and match catalog.id or title
     if source_file is None:
-        print(f"WARNING: no source user-catalog YAML found for series id '{raw_series_id}'")
+        catalog_files = sorted(Path("data-catalog/user-catalogs").glob("*.yaml")) + sorted(
+            Path("data-catalog/user-catalogs").glob("*.yml")
+        )
+
+        for yf in catalog_files:
+            doc = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
+            cat = doc.get("catalog", {}) or {}
+
+            cat_id = str(cat.get("id") or cat.get("identifier") or "").strip()
+            cat_title = str(cat.get("title") or cat.get("name") or "").strip()
+
+            if cat_id in candidate_names:
+                source_file = yf
+                break
+
+            if series_title and cat_title == series_title:
+                source_file = yf
+                break
+
+    if source_file is None:
         return []
 
     doc = yaml.safe_load(source_file.read_text(encoding="utf-8")) or {}
@@ -90,16 +104,12 @@ def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
         if isinstance(item, dict):
             cleaned.append(item)
 
-    print(f"Loaded {len(cleaned)} deleted dataset tombstone(s) from {source_file}")
     return cleaned
 
 
 def create_series_page(series: URIRef, catalog_graph: Graph):
     adoc_str = str()
 
-    # ---------------------------
-    # Load deleted dataset lineage info from source YAML
-    # ---------------------------
     deleted_datasets = _load_deleted_datasets_for_series(series, catalog_graph)
     deleted_ids = {
         str(item.get("id", "")).strip()
@@ -107,14 +117,10 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
         if str(item.get("id", "")).strip()
     }
 
-    # ---------------------------
     # Title
-    # ---------------------------
     adoc_str += "= " + get_title(series, catalog_graph) + "\n\n"
 
-    # ---------------------------
     # Description
-    # ---------------------------
     adoc_str += "== Description\n\n"
     desc = get_description(subject=series, graph=catalog_graph)
     if desc and desc != "None":
@@ -122,9 +128,7 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No description available.\n\n"
 
-    # ---------------------------
     # Themes
-    # ---------------------------
     adoc_str += "== Themes\n\n"
     themes = [
         create_local_link(theme, catalog_graph)
@@ -135,9 +139,7 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No themes available.\n\n"
 
-    # ---------------------------
     # Overview
-    # ---------------------------
     adoc_str += "== Overview\n\n"
     adoc_str += create_metadata_table(
         catalog_graph=catalog_graph,
@@ -145,19 +147,14 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
     )
     adoc_str += "\n\n"
 
-    # ---------------------------
-    # Active datasets in this series
-    # ---------------------------
+    # Active datasets
     adoc_str += "== Datasets in this series\n\n"
 
     active_dataset_links = []
     for dataset in catalog_graph.subjects(DCAT.inSeries, series):
         dataset_id = get_id(dataset, catalog_graph)
-
-        # Do not show datasets that are recorded as deleted
         if dataset_id in deleted_ids:
-          continue
-
+            continue
         active_dataset_links.append(create_local_link(dataset, catalog_graph))
 
     if active_dataset_links:
@@ -165,9 +162,7 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No active datasets in this series.\n\n"
 
-    # ---------------------------
-    # Deleted dataset lineage section
-    # ---------------------------
+    # Deleted datasets
     adoc_str += "== Deleted datasets in this series\n\n"
 
     if deleted_datasets:
@@ -189,9 +184,6 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No deleted datasets recorded for this series.\n\n"
 
-    # ---------------------------
-    # Write file
-    # ---------------------------
     write_file(
         adoc_str=adoc_str,
         resource=series,
