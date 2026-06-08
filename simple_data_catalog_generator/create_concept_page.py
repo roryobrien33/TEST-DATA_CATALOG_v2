@@ -106,18 +106,18 @@ def create_concept_page(concept: URIRef, catalog_graph: Graph):
         adoc_str += "* **Example:** Not available\n"
 
     if broader_id:
-        adoc_str += f"* **Broader concept:** {_concept_link_or_text(catalog_graph, broader_id)}\n"
+        adoc_str += f"* **Parent concept:** {_concept_link_or_text(catalog_graph, broader_id)}\n"
     else:
-        adoc_str += "* **Broader concept:** None\n"
+        adoc_str += "* **Parent concept:** None\n"
 
     if narrower_ids:
-        adoc_str += "* **Narrower concepts:**\n"
+        adoc_str += "* **Child concepts:**\n"
         for cid in narrower_ids:
             cid = str(cid).strip()
             if cid:
                 adoc_str += f"** {_concept_link_or_text(catalog_graph, cid)}\n"
     else:
-        adoc_str += "* **Narrower concepts:** None\n"
+        adoc_str += "* **Child concepts:** None\n"
 
     adoc_str += "\n"
 
@@ -132,19 +132,19 @@ def create_concept_page(concept: URIRef, catalog_graph: Graph):
     adoc_str += "== Concept hierarchy\n\n"
 
     if broader_id:
-        adoc_str += "* **Broader concept:**\n"
+        adoc_str += "* **Parent concept:**\n"
         adoc_str += f"** {_concept_link_or_text(catalog_graph, broader_id)}\n"
     else:
-        adoc_str += "* **Broader concept:** None\n"
+        adoc_str += "* **Parent concept:** None\n"
 
     if narrower_ids:
-        adoc_str += "* **Narrower concepts:**\n"
+        adoc_str += "* **Child concepts:**\n"
         for cid in narrower_ids:
             cid = str(cid).strip()
             if cid:
                 adoc_str += f"** {_concept_link_or_text(catalog_graph, cid)}\n"
     else:
-        adoc_str += "* **Narrower concepts:** None\n"
+        adoc_str += "* **Child concepts:** None\n"
 
     adoc_str += "\n"
 
