@@ -8,6 +8,8 @@ from simple_data_catalog_generator.page_creation_functions import (
     get_description,
     create_local_link,
     get_id,
+    get_prefLabel,
+    get_definition,
 )
 from simple_data_catalog_generator.create_metadata_table import create_metadata_table
 
@@ -43,19 +45,10 @@ def _candidate_series_names(raw_id: str, title: str):
 
 
 def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
-    """
-    Load deleted dataset tombstones from the matching source user-catalog YAML.
-
-    Matching strategy:
-    1. Try candidate filenames derived from the series id/title
-    2. If that fails, scan all user-catalog YAML files and match on catalog.id
-    3. If that fails, match on catalog.title
-    """
     raw_series_id = get_id(series, catalog_graph)
     series_title = get_title(series, catalog_graph)
     candidate_names = _candidate_series_names(raw_series_id, series_title)
 
-    # First try direct filename matches
     source_file = None
     for name in candidate_names:
         for ext in (".yaml", ".yml"):
@@ -66,7 +59,6 @@ def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
         if source_file is not None:
             break
 
-    # If not found, scan all user-catalog files and match catalog.id or title
     if source_file is None:
         catalog_files = sorted(Path("data-catalog/user-catalogs").glob("*.yaml")) + sorted(
             Path("data-catalog/user-catalogs").glob("*.yml")
@@ -107,6 +99,62 @@ def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
     return cleaned
 
 
+def _build_theme_concept_table_for_series(series: URIRef, catalog_graph: Graph) -> str:
+    """
+    Build a table of concepts actually linked to datasets in this series.
+    """
+    concept_to_datasets = {}
+
+    for dataset in catalog_graph.subjects(DCAT.inSeries, series):
+        dataset_id = get_id(dataset, catalog_graph)
+
+        for concept in catalog_graph.objects(dataset, DCAT.theme):
+            concept_to_datasets.setdefault(concept, set()).add(dataset_id)
+
+    if not concept_to_datasets:
+        return "No concepts linked to datasets in this catalog.\n\n"
+
+    rows = []
+    for concept, linked_dataset_ids in concept_to_datasets.items():
+        concept_name = get_prefLabel(concept, catalog_graph)
+        if not concept_name or concept_name == "None":
+            concept_name = get_title(concept, catalog_graph)
+        if not concept_name or concept_name == "None":
+            concept_name = get_id(concept, catalog_graph)
+
+        concept_id = get_id(concept, catalog_graph)
+        concept_definition = get_definition(concept, catalog_graph)
+        if not concept_definition or concept_definition == "None":
+            concept_definition = "Not available"
+
+        concept_link = create_local_link(concept, catalog_graph)
+        concept_name_display = concept_link if concept_link else concept_name
+
+        rows.append(
+            (
+                concept_name.lower(),
+                concept_name_display,
+                concept_id,
+                len(linked_dataset_ids),
+                concept_definition,
+            )
+        )
+
+    rows.sort(key=lambda x: x[0])
+
+    table_str = "|===\n"
+    table_str += "| Concept | ID | Linked datasets | Definition\n\n"
+
+    for _, concept_name_display, concept_id, linked_count, concept_definition in rows:
+        table_str += f"| {concept_name_display}\n"
+        table_str += f"| `{concept_id}`\n"
+        table_str += f"| {linked_count}\n"
+        table_str += f"| {concept_definition}\n\n"
+
+    table_str += "|===\n\n"
+    return table_str
+
+
 def create_series_page(series: URIRef, catalog_graph: Graph):
     adoc_str = str()
 
@@ -128,16 +176,9 @@ def create_series_page(series: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No description available.\n\n"
 
-    # Themes
+    # Themes (concepts linked to datasets in this series)
     adoc_str += "== Themes\n\n"
-    themes = [
-        create_local_link(theme, catalog_graph)
-        for theme in catalog_graph.objects(series, DCAT.theme)
-    ]
-    if themes:
-        adoc_str += "\n".join(themes) + "\n\n"
-    else:
-        adoc_str += "No themes available.\n\n"
+    adoc_str += _build_theme_concept_table_for_series(series=series, catalog_graph=catalog_graph)
 
     # Overview
     adoc_str += "== Overview\n\n"
