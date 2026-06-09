@@ -1,126 +1,88 @@
-import re
-from rdflib import Graph, URIRef, RDF, DCTERMS, Namespace
-from simple_data_catalog_generator.page_creation_functions import write_file, get_title, get_description, create_local_link
+from pathlib import Path
+import yaml
 
-# ODRL namespace – the test data uses the standard ODRL terms
+from rdflib import Graph, URIRef, RDF
+from rdflib.namespace import DCTERMS
+from rdflib import Namespace
+
+from simple_data_catalog_generator.page_creation_functions import (
+    write_file,
+    get_id,
+    get_title,
+    get_description,
+)
+
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
-# ---------------------------------------------------------------------------
-# Helper – turn a list of ODRL triples (uid, description, action, assignee)
-# into a simple AsciiDoc table.
-def _format_odrl_section(section_name: str, items: list[tuple[str, str, str, list[str]]]) -> str:
+
+def _load_source_policy_yaml(policy: URIRef, catalog_graph: Graph):
     """
-    Returns an AsciiDoc fragment:
-
-    .Obligations
-    |===
-    | UID | Description | Action | Assignee(s)
-
-    | ex:register-in-catalog | … | register | Data Provider
-    |===
+    Load the source policy YAML file corresponding to this policy.
     """
-    if not items:
-        return f"*No {section_name.lower()} defined.*\n\n"
+    policy_id = get_id(policy, catalog_graph)
 
-    table = f".{section_name}\n|===\n| UID | Description | Action | Assignee(s)\n\n"
-    for uid, descr, action, assignees in items:
-        assignee_str = ", ".join(assignees) if assignees else ""
-        # escape pipe characters that would break the table
-        descr = descr.replace("|", "\\|")
-        table += f"| {uid} | {descr} | {action} | {assignee_str}\n"
-    table += "|===\n\n"
-    return table
+    candidate_names = [policy_id]
+    if ":" in policy_id:
+        candidate_names.append(policy_id.split(":", 1)[1])
+    if "/" in policy_id:
+        candidate_names.append(policy_id.rstrip("/").split("/")[-1])
+    if "#" in policy_id:
+        candidate_names.append(policy_id.split("#")[-1])
+
+    seen = set()
+    candidate_names = [x for x in candidate_names if not (x in seen or seen.add(x))]
+
+    for name in candidate_names:
+        for ext in (".yaml", ".yml"):
+            p = Path(f"data-catalog/policies/{name}{ext}")
+            if p.exists():
+                return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+    return {}
 
 
-# ---------------------------------------------------------------------------
-def create_policy_page(
-    policy: URIRef,
-    catalog_graph: Graph
-) -> None:
-    """
-    Generate one AsciiDoc page per ODRL policy found in *catalog_graph*.
+def create_policy_page(policy: URIRef, catalog_graph: Graph):
+    adoc_str = str()
 
-    The page layout mimics the other ``create_*`` helpers:
+    source_doc = _load_source_policy_yaml(policy, catalog_graph)
+    source_policy = source_doc.get("policy", {}) or {}
 
-    * **Title** – ``dcterms:title`` if present, otherwise the policy’s URI fragment.
-    * **First paragraph** – the policy’s ``dcterms:description`` (if any).
-    * **Table** – three sections (Permissions, Obligations, Prohibitions) listing the
-      corresponding ODRL triples (uid, description, action, assignee).
+    policy_id = get_id(policy, catalog_graph)
 
-    The file name is built from ``get_id(policy, catalog_graph)`` and the
-    ``.adoc`` extension, e.g. ``open-information-policy.adoc``.
-    """
+    policy_title = get_title(policy, catalog_graph)
+    if not policy_title or policy_title == "None":
+        policy_title = str(source_policy.get("title", "")).strip()
+    if not policy_title or policy_title == "None":
+        policy_title = policy_id
 
-    policy_uris = set()
+    policy_description = get_description(policy, catalog_graph)
+    if not policy_description or policy_description == "None":
+        policy_description = str(source_policy.get("description", "")).strip()
 
-    for s in catalog_graph.subjects(RDF.type, ODRL.Policy):
-        policy_uris.add(s)
+    # Title
+    adoc_str += "= " + policy_title + "\n\n"
 
-    if not policy_uris:
-        # Nothing to do – silently return so the caller can continue processing
-        return
+    # Policy details
+    adoc_str += "== Policy Details\n\n"
+    adoc_str += f"* **Title:** {policy_title}\n"
+    adoc_str += f"* **ID:** `{policy_id}`\n"
 
-    # -----------------------------------------------------------------------
-    for policy in policy_uris:
-        # ---- title ---------------------------------------------------------
-        title = str(catalog_graph.value(policy, DCTERMS.title))
-        if title is None or title == "None":
-            # fall back to fragment or last path segment (same logic as get_id)
-            title = str(policy)
+    if policy_description and policy_description != "None":
+        adoc_str += f"* **Description:** {policy_description}\n"
+    else:
+        adoc_str += "* **Description:** Not available\n"
 
-        # ---- description (first paragraph) ---------------------------------
-        description = str(catalog_graph.value(policy, DCTERMS.description))
-        description = "" if description in (None, "None") else description
+    adoc_str += "\n"
 
-        # ---- collect ODRL components ----------------------------------------
-        permissions = []
-        obligations = []
-        prohibitions = []
+    # Placeholder linkage section
+    adoc_str += "== Linked datasets\n\n"
+    adoc_str += "Policy linkage will be shown once policies are explicitly linked to datasets.\n\n"
 
-        # Permissions
-        for perm in catalog_graph.objects(policy, ODRL.permission):
-            uid = str(perm)
-            descr = str(catalog_graph.value(perm, DCTERMS.description) or "")
-            action = str(catalog_graph.value(perm, ODRL.action) or "")
-            assignees = [
-                str(a) for a in catalog_graph.objects(perm, ODRL.assignee)
-            ]
-            permissions.append((uid, descr, action, assignees))
+    write_file(
+        adoc_str=adoc_str,
+        resource=policy,
+        output_dir="modules/policy/pages/",
+        catalog_graph=catalog_graph,
+    )
 
-        # Obligations
-        for obl in catalog_graph.objects(policy, ODRL.obligation):
-            uid = str(obl)
-            descr = str(catalog_graph.value(obl, DCTERMS.description) or "")
-            action = str(catalog_graph.value(obl, ODRL.action) or "")
-            assignees = [
-                str(a) for a in catalog_graph.objects(obl, ODRL.assignee)
-            ]
-            obligations.append((uid, descr, action, assignees))
-
-        # Prohibitions
-        for pro in catalog_graph.objects(policy, ODRL.prohibition):
-            uid = str(pro)
-            descr = str(catalog_graph.value(pro, DCTERMS.description) or "")
-            action = str(catalog_graph.value(pro, ODRL.action) or "")
-            assignees = [
-                str(a) for a in catalog_graph.objects(pro, ODRL.assignee)
-            ]
-            prohibitions.append((uid, descr, action, assignees))
-
-        # ---- build AsciiDoc string -----------------------------------------
-        adoc = f"= {title}\n\n"
-
-        if description:
-            adoc += f"{description}\n\n"
-
-        adoc += _format_odrl_section("Permissions", permissions)
-        adoc += _format_odrl_section("Obligations", obligations)
-        adoc += _format_odrl_section("Prohibitions", prohibitions)
-
-        # ---- write file -----------------------------------------------------
-        write_file(
-            adoc_str=adoc,
-            resource=policy,
-            output_dir='modules/policy/pages/', 
-            catalog_graph=catalog_graph,
-        )
+    return 1
