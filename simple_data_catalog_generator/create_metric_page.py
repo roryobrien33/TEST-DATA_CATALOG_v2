@@ -1,73 +1,93 @@
-import pydantic
-from rdflib import Namespace, Graph, URIRef, RDF, DCAT, DCTERMS, SKOS
+from pathlib import Path
+import yaml
 
-from pydantic import BaseModel
-from typing import List, Optional
-from simple_data_catalog_generator.page_creation_functions import write_file, get_prefLabel, get_definition, create_local_link 
-from simple_data_catalog_generator.create_adoc_table import create_adoc_table
+from rdflib import Graph, URIRef, RDF
+from rdflib.namespace import DCTERMS, DCAT
+from rdflib import Namespace
 
-# from create_metadata_table import create_metadata_table
+from simple_data_catalog_generator.page_creation_functions import (
+    write_file,
+    get_id,
+    create_local_link,
+)
 
-import os
-import re
+DQV = Namespace("http://www.w3.org/ns/dqv#")
+
+
+def _load_source_metric_yaml(metric: URIRef, catalog_graph: Graph):
+    metric_id = get_id(metric, catalog_graph)
+
+    candidate_names = [metric_id]
+    if ":" in metric_id:
+        candidate_names.append(metric_id.split(":", 1)[1])
+    if "/" in metric_id:
+        candidate_names.append(metric_id.rstrip("/").split("/")[-1])
+    if "#" in metric_id:
+        candidate_names.append(metric_id.split("#")[-1])
+
+    seen = set()
+    candidate_names = [x for x in candidate_names if not (x in seen or seen.add(x))]
+
+    for name in candidate_names:
+        for ext in (".yaml", ".yml"):
+            p = Path(f"data-catalog/metrics/{name}{ext}")
+            if p.exists():
+                return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+    return {}
+
 
 def create_metric_page(metric: URIRef, catalog_graph: Graph):
-    """
-    Creates an AsciiDoc page for a given metric in the data catalog.
-    
-    This function generates documentation for a specific metric by extracting 
-    its label, definition, and expected datatype from the RDF graph and 
-    writing them to an AsciiDoc file.
-    
-    Args:
-        metric (URIRef): The URI reference of the metric to document
-        catalog_graph (Graph): The RDF graph containing the catalog data
-        
-    Returns:
-        int: Always returns 1 indicating successful completion
-        
-    Example:
-        >>> create_metric_page(metric_uri, catalog_graph)
-        1
-        
-    Note:
-        The function writes output to 'modules/metric/pages/' directory
-        and prints the datatype to console for debugging purposes
-    """
-    DQV = Namespace("http://www.w3.org/ns/dqv#")
     adoc_str = str()
 
-    # add title
-    adoc_str = adoc_str +"= " + get_prefLabel(subject=metric, 
-                                    graph=catalog_graph) + "\n\n"
+    source_doc = _load_source_metric_yaml(metric, catalog_graph)
+    source_metric = source_doc.get("metric", {}) or {}
 
-    # add description
-    adoc_str = adoc_str + get_definition(subject=metric,
-                                          graph=catalog_graph) + "\n\n"
-    
-    datatype= catalog_graph.value(metric,DQV.expectedDataType)
-    print(datatype)
-    adoc_str += "Expected datatype: " + str(datatype)
+    metric_id = get_id(metric, catalog_graph)
+    metric_name = str(catalog_graph.value(metric, DCTERMS.title) or "").strip()
+    if not metric_name:
+        metric_name = str(catalog_graph.value(metric, Namespace("http://www.w3.org/2004/02/skos/core#").prefLabel) or "").strip()
+    if not metric_name:
+        metric_name = metric_id
 
+    metric_definition = str(
+        catalog_graph.value(metric, Namespace("http://www.w3.org/2004/02/skos/core#").definition) or ""
+    ).strip()
 
-    # Add datasets with quality measurements using this metric
-    datasets = []
-    for measurement in catalog_graph.subjects(RDF.type, DQV.QualityMeasurement):
-        if catalog_graph.value(measurement, DQV.isMeasurementOf) == metric:
-            dataset_uri = catalog_graph.value(measurement, DQV.computedOn)
-            dataset_title = create_local_link(resource=dataset_uri, catalog_graph=catalog_graph)
-            datasets.append(dataset_title)
-    if datasets:
-        adoc_str += "\n\nDatasets with quality measurements using this metric:\n" + "\n"
-        adoc_str+= create_adoc_table(datasets, num_cols=1)
+    expected_data_type = str(source_metric.get("expectedDataType", "")).strip()
+    in_dimension = str(source_metric.get("inDimension", "")).strip()
+
+    adoc_str += "= " + metric_name + "\n\n"
+
+    adoc_str += "== Metric Details\n\n"
+    adoc_str += f"* **Name:** {metric_name}\n"
+    adoc_str += f"* **ID:** `{metric_id}`\n"
+
+    if metric_definition:
+        adoc_str += f"* **Definition:** {metric_definition}\n"
     else:
-        adoc_str += "\n\nNo datasets found with quality measurements using this metric."
+        adoc_str += "* **Definition:** Not available\n"
 
+    if expected_data_type:
+        adoc_str += f"* **Expected data type:** {expected_data_type}\n"
+    else:
+        adoc_str += "* **Expected data type:** Not available\n"
 
-    # write file
-    write_file(adoc_str=adoc_str, 
-               resource=metric, 
-               output_dir='modules/metric/pages/', 
-               catalog_graph= catalog_graph)
+    if in_dimension:
+        adoc_str += f"* **Metric dimension:** {in_dimension}\n"
+    else:
+        adoc_str += "* **Metric dimension:** Not available\n"
+
+    adoc_str += "\n"
+
+    adoc_str += "== Linked datasets\n\n"
+    adoc_str += "Metric linkage will be shown through data quality measurements.\n\n"
+
+    write_file(
+        adoc_str=adoc_str,
+        resource=metric,
+        output_dir="modules/metric/pages/",
+        catalog_graph=catalog_graph,
+    )
 
     return 1
