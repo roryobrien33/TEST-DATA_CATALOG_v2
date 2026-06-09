@@ -11,3 +11,6 @@ datasets:
   description: X
   use_case: a-a
   location: Dublin, Ireland
+  concepts:
+  - sdcdc:concept-voltage
+  - sdcdc:concept-harmonics
