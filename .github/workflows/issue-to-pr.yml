@@ -949,8 +949,8 @@ jobs:
       - name: Show pending changes
         if: ${{ success() }}
         run: |
-          echo "=== git status --short ==="
-          git status --short
+          echo "=== git status --short --untracked-files=all ==="
+          git status --short --untracked-files=all
           echo "=== git diff --name-only ==="
           git diff --name-only
 
@@ -1031,11 +1031,6 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ github.token }}
-          add-paths: |
-            data-catalog/user-catalogs/*.yaml
-            data-catalog/concepts/*.yaml
-            data-catalog/policies/*.yaml
-            data-catalog/metrics/*.yaml
           commit-message: "Catalog intake: issue #${{ github.event.issue.number }}"
           branch: "catalog-intake/${{ github.event.issue.number }}"
           title: "Catalog intake: issue #${{ github.event.issue.number }}"
@@ -1050,3 +1045,4 @@ jobs:
 
             After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
           labels: "catalog-intake-pr"
+``
