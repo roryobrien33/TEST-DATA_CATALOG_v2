@@ -426,27 +426,31 @@ jobs:
         if: ${{ steps.parse.outputs.is_create_catalog == 'true' }}
         run: |
           set -euo pipefail
-          mkdir -p data-catalog/user-catalogs
 
           python - <<'PY'
           import os
-          import re
           import pathlib
+          import sys
           import yaml
 
-          catalog_id = os.environ["CATALOG_ID"]
-          catalog_name = os.environ["CATALOG_NAME"]
-          catalog_description = os.environ["CATALOG_DESCRIPTION"]
-          raw_use_cases = os.environ["CATALOG_USE_CASES"]
-          owner = os.environ.get("CATALOG_OWNER", "").strip()
-          contact = os.environ.get("CATALOG_CONTACT", "").strip()
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import generate_catalog_id, normalize_catalog_id, normalize_id_base, normalizeUseCase if False else None
+          # use local helper below to avoid changing behavior unexpectedly
 
           def norm_use_case(s: str) -> str:
+              import re
               s = s.strip().lower()
               s = re.sub(r"[\s_]+", "-", s)
               s = re.sub(r"[^a-z0-9-]", "-", s)
               s = re.sub(r"-+", "-", s).strip("-")
               return s
+
+          catalog_id = os.environ["CATALOG_ID"].strip()
+          catalog_name = os.environ["CATALOG_NAME"].strip()
+          catalog_description = os.environ["CATALOG_DESCRIPTION"].strip()
+          raw_use_cases = os.environ["CATALOG_USE_CASES"].strip()
+          owner = os.environ.get("CATALOG_OWNER", "").strip()
+          contact = os.environ.get("CATALOG_CONTACT", "").strip()
 
           use_cases = [norm_use_case(x) for x in raw_use_cases.split(",")]
           use_cases = [x for x in use_cases if x]
@@ -491,9 +495,25 @@ jobs:
 
           python - <<'PY'
           import os
-          import re
           import pathlib
+          import re
+          import sys
           import yaml
+
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import (
+              normalize_dataset_id,
+              normalize_policy_id,
+              normalize_metric_id,
+              parse_csv_ids,
+          )
+
+          def norm_use_case(s: str) -> str:
+              s = s.strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -518,59 +538,42 @@ jobs:
           if not isinstance(datasets, list):
               raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
 
-          def norm_use_case(s: str) -> str:
-              s = s.strip().lower()
-              s = re.sub(r"[\s_]+", "-", s)
-              s = re.sub(r"[^a-z0-9-]", "-", s)
-              s = re.sub(r"-+", "-", s).strip("-")
-              return s
-
-          def ensure_catalog_scoped_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
-              s = dataset_id_value.strip()
-              if not s:
-                  return s
-              if s.startswith("http://") or s.startswith("https://"):
-                  return s
-              if ":" in s:
-                  return s
-              return f"sdcdc:{catalog_id_value}-{s}"
-
-          dataset_identifier = ensure_catalog_scoped_dataset_id(catalog_id, dataset_identifier_raw)
+          dataset_identifier = normalize_dataset_id(catalog_id, dataset_identifier_raw)
           dataset_use_case = norm_use_case(dataset_use_case_raw)
 
           allowed = catalog.get("use_cases", []) or []
           if dataset_use_case not in allowed:
               raise SystemExit(
-                f"Use case not allowed for this catalog. Provided: '{dataset_use_case_raw}' "
-                f"(normalized: '{dataset_use_case}'). Allowed: {', '.join(allowed)}"
+                  f"Use case not allowed for this catalog. Provided: '{dataset_use_case_raw}' "
+                  f"(normalized: '{dataset_use_case}'). Allowed: {', '.join(allowed)}"
               )
 
           for ds in datasets:
               ds_id = ds.get("id") or ds.get("identifier")
               if ds_id == dataset_identifier:
-                raise SystemExit(f"Dataset identifier already exists in catalog: {dataset_identifier}")
+                  raise SystemExit(f"Dataset identifier already exists in catalog: {dataset_identifier}")
 
           concepts = [x.strip() for x in concepts_raw.split(",") if x.strip()]
-          policy_ids = [x.strip() for x in policy_ids_raw.split(",") if x.strip()]
-          metric_ids = [x.strip() for x in metric_ids_raw.split(",") if x.strip()]
+          policy_ids = parse_csv_ids(policy_ids_raw, normalize_policy_id)
+          metric_ids = parse_csv_ids(metric_ids_raw, normalize_metric_id)
           distributions = [x.strip() for x in distributions_raw.splitlines() if x.strip()]
 
           new_ds = {
-            "id": dataset_identifier,
-            "title": dataset_title,
-            "description": dataset_description,
-            "use_case": dataset_use_case,
-            "location": location,
+              "id": dataset_identifier,
+              "title": dataset_title,
+              "description": dataset_description,
+              "use_case": dataset_use_case,
+              "location": location,
           }
 
           if concepts:
-            new_ds["concepts"] = concepts
+              new_ds["concepts"] = concepts
           if policy_ids:
-            new_ds["policies"] = policy_ids
+              new_ds["policies"] = policy_ids
           if metric_ids:
-            new_ds["metrics"] = metric_ids
+              new_ds["metrics"] = metric_ids
           if distributions:
-            new_ds["distributions"] = distributions
+              new_ds["distributions"] = distributions
 
           datasets.append(new_ds)
           doc["datasets"] = datasets
@@ -597,9 +600,25 @@ jobs:
 
           python - <<'PY'
           import os
-          import re
           import pathlib
+          import re
+          import sys
           import yaml
+
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import (
+              normalize_dataset_id,
+              normalize_policy_id,
+              normalize_metric_id,
+              parse_csv_ids,
+          )
+
+          def norm_use_case(s: str) -> str:
+              s = s.strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -624,24 +643,7 @@ jobs:
           if not isinstance(datasets, list):
             raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
 
-          def norm_use_case(s: str) -> str:
-            s = s.strip().lower()
-            s = re.sub(r"[\s_]+", "-", s)
-            s = re.sub(r"[^a-z0-9-]", "-", s)
-            s = re.sub(r"-+", "-", s).strip("-")
-            return s
-
-          def ensure_catalog_scoped_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
-            s = dataset_id_value.strip()
-            if not s:
-              return s
-            if s.startswith("http://") or s.startswith("https://"):
-              return s
-            if ":" in s:
-              return s
-            return f"sdcdc:{catalog_id_value}-{s}"
-
-          dataset_identifier = ensure_catalog_scoped_dataset_id(catalog_id, dataset_identifier_raw)
+          dataset_identifier = normalize_dataset_id(catalog_id, dataset_identifier_raw)
 
           target = None
           for ds in datasets:
@@ -676,10 +678,10 @@ jobs:
             target["concepts"] = [x.strip() for x in concepts_raw.split(",") if x.strip()]
 
           if policy_ids_raw:
-            target["policies"] = [x.strip() for x in policy_ids_raw.split(",") if x.strip()]
+            target["policies"] = parse_csv_ids(policy_ids_raw, normalize_policy_id)
 
           if metric_ids_raw:
-            target["metrics"] = [x.strip() for x in metric_ids_raw.split(",") if x.strip()]
+            target["metrics"] = parse_csv_ids(metric_ids_raw, normalize_metric_id)
 
           if distributions_raw:
             target["distributions"] = [x.strip() for x in distributions_raw.splitlines() if x.strip()]
@@ -707,8 +709,12 @@ jobs:
           python - <<'PY'
           import os
           import pathlib
+          import sys
           import yaml
           import datetime
+
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import normalize_dataset_id
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -731,17 +737,7 @@ jobs:
           if not isinstance(deleted_datasets, list):
             raise SystemExit("Invalid catalog YAML structure: deleted_datasets must be a list")
 
-          def ensure_catalog_scoped_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
-            s = dataset_id_value.strip()
-            if not s:
-              return s
-            if s.startswith("http://") or s.startswith("https://"):
-              return s
-            if ":" in s:
-              return s
-            return f"sdcdc:{catalog_id_value}-{s}"
-
-          dataset_identifier = ensure_catalog_scoped_dataset_id(catalog_id, dataset_identifier_raw)
+          dataset_identifier = normalize_dataset_id(catalog_id, dataset_identifier_raw)
 
           removed_dataset = None
           kept_datasets = []
@@ -785,16 +781,19 @@ jobs:
         if: ${{ steps.parse.outputs.is_create_concept == 'true' }}
         run: |
           set -euo pipefail
-          mkdir -p data-catalog/concepts
 
           python - <<'PY'
           import os
           import pathlib
           import re
+          import sys
           import yaml
           import json
 
-          concept_id = os.environ["CONCEPT_ID"].strip()
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import normalize_concept_id, generate_concept_id
+
+          concept_id_raw = os.environ["CONCEPT_ID"].strip()
           concept_pref_label = os.environ["CONCEPT_PREF_LABEL"].strip()
           concept_definition = os.environ["CONCEPT_DEFINITION"].strip()
           concept_alt_label = os.environ.get("CONCEPT_ALT_LABEL", "").strip()
@@ -802,6 +801,8 @@ jobs:
           relationship_type = os.environ.get("RELATIONSHIP_TYPE", "").strip().lower()
           parent_concept_id = os.environ.get("PARENT_CONCEPT_ID", "").strip()
           child_concept_ids = json.loads(os.environ.get("CHILD_CONCEPT_IDS", "[]"))
+
+          concept_id = normalize_concept_id(concept_id_raw) if concept_id_raw else generate_concept_id(concept_pref_label)
 
           def file_stem_from_id(value: str) -> str:
             s = value.strip()
@@ -836,13 +837,14 @@ jobs:
             doc["concept"]["example"] = concept_example
 
           if relationship_type == "child concept" and parent_concept_id:
-            doc["concept"]["broader"] = parent_concept_id
+            doc["concept"]["broader"] = normalize_concept_id(parent_concept_id)
 
           if relationship_type == "parent concept" and child_concept_ids:
-            doc["concept"]["narrower"] = child_concept_ids
+            doc["concept"]["narrower"] = [normalize_concept_id(x) for x in child_concept_ids]
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote concept file: {p}")
+          print(f"Concept ID: {concept_id}")
           PY
         env:
           CONCEPT_ID: ${{ steps.parse.outputs.concept_id_E }}
@@ -858,17 +860,22 @@ jobs:
         if: ${{ steps.parse.outputs.is_create_policy == 'true' }}
         run: |
           set -euo pipefail
-          mkdir -p data-catalog/policies
 
           python - <<'PY'
           import os
           import pathlib
           import re
+          import sys
           import yaml
 
-          policy_id = os.environ["POLICY_ID"].strip()
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import normalize_policy_id, generate_policy_id
+
+          policy_id_raw = os.environ["POLICY_ID"].strip()
           policy_title = os.environ["POLICY_TITLE"].strip()
           policy_description = os.environ["POLICY_DESCRIPTION"].strip()
+
+          policy_id = normalize_policy_id(policy_id_raw) if policy_id_raw else generate_policy_id(policy_title)
 
           def file_stem_from_id(value: str) -> str:
             s = value.strip()
@@ -898,6 +905,7 @@ jobs:
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote policy file: {p}")
+          print(f"Policy ID: {policy_id}")
           PY
         env:
           POLICY_ID: ${{ steps.parse.outputs.policy_id_F }}
@@ -908,19 +916,24 @@ jobs:
         if: ${{ steps.parse.outputs.is_create_metric == 'true' }}
         run: |
           set -euo pipefail
-          mkdir -p data-catalog/metrics
 
           python - <<'PY'
           import os
           import pathlib
           import re
+          import sys
           import yaml
 
-          metric_id = os.environ["METRIC_ID"].strip()
+          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
+          from id_utils import normalize_metric_id, generate_metric_id
+
+          metric_id_raw = os.environ["METRIC_ID"].strip()
           metric_pref_label = os.environ["METRIC_PREF_LABEL"].strip()
           metric_definition = os.environ["METRIC_DEFINITION"].strip()
           metric_expected_data_type = os.environ.get("METRIC_EXPECTED_DATA_TYPE", "").strip()
           metric_dimension = os.environ.get("METRIC_DIMENSION", "").strip()
+
+          metric_id = normalize_metric_id(metric_id_raw) if metric_id_raw else generate_metric_id(metric_pref_label)
 
           def file_stem_from_id(value: str) -> str:
             s = value.strip()
@@ -956,6 +969,7 @@ jobs:
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote metric file: {p}")
+          print(f"Metric ID: {metric_id}")
           PY
         env:
           METRIC_ID: ${{ steps.parse.outputs.metric_id_G }}
