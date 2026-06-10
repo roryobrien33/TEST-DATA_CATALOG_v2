@@ -1,0 +1,4 @@
+metric:
+  identifier: sdcdc:metric-bb
+  prefLabel: BB
+  definition: BB
