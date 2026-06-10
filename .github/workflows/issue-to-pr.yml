@@ -1045,4 +1045,3 @@ jobs:
 
             After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
           labels: "catalog-intake-pr"
-``
