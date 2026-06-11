@@ -11,6 +11,9 @@ ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
 
 def _sanitize_page_id(value: str) -> str:
+    """
+    Convert a display ID / CURIE / IRI into a filesystem/xref-safe page ID.
+    """
     s = (value or "").strip()
 
     # Prefer local part after CURIE prefix
@@ -29,7 +32,13 @@ def _sanitize_page_id(value: str) -> str:
     return s
 
 
-def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
+def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: str, id_field: str) -> str:
+    """
+    Generic fallback for identifiers when dcterms:identifier is not present in the RDF graph.
+
+    It tries to map a generated/fallback resource URI back to a source YAML file and read
+    the real identifier field from there.
+    """
     resource_str = str(resource)
     candidate_names = []
 
@@ -48,6 +57,12 @@ def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
         if "concept-" in name:
             expanded.append(name[name.find("concept-"):])
 
+        if "metric-" in name:
+            expanded.append(name[name.find("metric-"):])
+
+        if "policy-" in name:
+            expanded.append(name[name.find("policy-"):])
+
     seen = set()
     final_candidates = []
     for c in expanded:
@@ -58,98 +73,42 @@ def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
 
     for name in final_candidates:
         for ext in (".yaml", ".yml"):
-            path = Path(f"data-catalog/concepts/{name}{ext}")
+            path = Path(f"data-catalog/{entity_dir}/{name}{ext}")
             if path.exists():
                 doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-                concept = doc.get("concept", {}) or {}
-                identifier = str(concept.get("identifier", "")).strip()
+                entity = doc.get(yaml_key, {}) or {}
+                identifier = str(entity.get(id_field, "")).strip()
                 if identifier:
                     return identifier
 
     return ""
 
 
-def get_prefLabel(subject: URIRef, graph: Graph) -> str:
-    pref_label = str(graph.value(subject, SKOS.prefLabel))
-    return pref_label
+def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="concepts",
+        yaml_key="concept",
+        id_field="identifier",
+    )
 
 
-def get_altLabel(subject: URIRef, graph: Graph) -> str:
-    alt_label = str(graph.value(subject, SKOS.altLabel))
-    return alt_label
+def _metric_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="metrics",
+        yaml_key="metric",
+        id_field="identifier",
+    )
 
 
-def get_definition(subject: URIRef, graph: Graph) -> str:
-    definition = str(graph.value(subject, SKOS.definition))
-    return definition
-
-
-def get_title(subject: URIRef, graph: Graph) -> str:
-    title = graph.value(subject, DCTERMS.title)
-    title_str = str(title)
-
-    if title_str == "None" or not title_str.strip():
-        # fallback for concepts
-        pref_label = str(graph.value(subject, SKOS.prefLabel))
-        if pref_label != "None" and pref_label.strip():
-            return pref_label.strip()
-
-        subject_str = str(subject)
-        if "#" in subject_str:
-            title_str = subject_str.split("#")[1]
-        elif "/" in subject_str:
-            title_str = subject_str.rstrip("/").split("/")[-1]
-        else:
-            title_str = re.sub(r".*?\/", "/", subject_str).replace("/", "")
-
-    return title_str
-
-
-def get_status(subject: URIRef, graph: Graph) -> str:
-    title = graph.value(subject, ADMS.status)
-    title_str = str(title)
-    return title_str
-
-
-def get_description(subject: URIRef, graph: Graph) -> str:
-    description = graph.value(subject, DCTERMS.description)
-    description_str = str(description)
-    return description_str
-
-
-def get_id(resource: URIRef, catalog_graph: Graph) -> str:
-    """
-    Display identifier (full identifier if available).
-    """
-    identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
-    if identifier != "None" and identifier.strip():
-        return identifier.strip()
-
-    rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
-
-    if rdf_type == SKOS.Concept:
-        concept_identifier = _concept_identifier_from_source_yaml(resource)
-        if concept_identifier:
-            return concept_identifier
-
-    resource_str = str(resource)
-
-    if "#" in resource_str:
-        identifier = resource_str.split("#")[1]
-    elif "/" in resource_str:
-        identifier = resource_str.rstrip("/").split("/")[-1]
-    else:
-        identifier = re.sub(r".*?\/", "/", resource_str).replace("/", "")
-
-    return identifier
-
-
-def get_page_id(resource: URIRef, catalog_graph: Graph) -> str:
-    """
-    Safe file/xref target id. This should be used for filenames and xrefs.
-    """
-    display_id = get_id(resource=resource, catalog_graph=catalog_graph)
-    return _sanitize_page_id(display_id)
+def _policy_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="policies",
+        yaml_key="policy",
+        id_field="uid",
+    )
 
 
 def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
@@ -164,6 +123,8 @@ def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
         local_link = f"xref:concept:{page_id}.adoc[{pref_label}]"
     elif rdf_type == DQV.Metric:
         pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
+        if not pref_label or pref_label == "None":
+            pref_label = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:metric:{page_id}.adoc[{pref_label}]"
     elif rdf_type == DCAT.DataService:
         title = get_title(subject=resource, graph=catalog_graph)
@@ -197,6 +158,104 @@ def write_file(adoc_str: str, resource: URIRef, output_dir: str, catalog_graph: 
         resource=resource,
         catalog_graph=catalog_graph,
     )
+
+
+def get_prefLabel(subject: URIRef, graph: Graph) -> str:
+    pref_label = str(graph.value(subject, SKOS.prefLabel))
+    return pref_label
+
+
+def get_altLabel(subject: URIRef, graph: Graph) -> str:
+    alt_label = str(graph.value(subject, SKOS.altLabel))
+    return alt_label
+
+
+def get_definition(subject: URIRef, graph: Graph) -> str:
+    definition = str(graph.value(subject, SKOS.definition))
+    return definition
+
+
+def get_title(subject: URIRef, graph: Graph) -> str:
+    title = graph.value(subject, DCTERMS.title)
+    title_str = str(title)
+
+    if title_str == "None" or not title_str.strip():
+        # Fallback for SKOS resources
+        pref_label = str(graph.value(subject, SKOS.prefLabel))
+        if pref_label != "None" and pref_label.strip():
+            return pref_label.strip()
+
+        subject_str = str(subject)
+        if "#" in subject_str:
+            title_str = subject_str.split("#")[1]
+        elif "/" in subject_str:
+            title_str = subject_str.rstrip("/").split("/")[-1]
+        else:
+            title_str = re.sub(r".*?\/", "/", subject_str).replace("/", "")
+
+    return title_str
+
+
+def get_status(subject: URIRef, graph: Graph) -> str:
+    title = graph.value(subject, ADMS.status)
+    title_str = str(title)
+    return title_str
+
+
+def get_description(subject: URIRef, graph: Graph) -> str:
+    description = graph.value(subject, DCTERMS.description)
+    description_str = str(description)
+    return description_str
+
+
+def get_id(resource: URIRef, catalog_graph: Graph) -> str:
+    """
+    Display identifier (full identifier if available).
+
+    Priority:
+    1. dcterms:identifier from RDF graph
+    2. source YAML fallback for concept / metric / policy
+    3. URI-derived fallback
+    """
+    identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
+    if identifier != "None" and identifier.strip():
+        return identifier.strip()
+
+    rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
+
+    if rdf_type == SKOS.Concept:
+        concept_identifier = _concept_identifier_from_source_yaml(resource)
+        if concept_identifier:
+            return concept_identifier
+
+    if rdf_type == DQV.Metric:
+        metric_identifier = _metric_identifier_from_source_yaml(resource)
+        if metric_identifier:
+            return metric_identifier
+
+    if rdf_type == ODRL.Policy:
+        policy_identifier = _policy_identifier_from_source_yaml(resource)
+        if policy_identifier:
+            return policy_identifier
+
+    resource_str = str(resource)
+
+    if "#" in resource_str:
+        identifier = resource_str.split("#")[1]
+    elif "/" in resource_str:
+        identifier = resource_str.rstrip("/").split("/")[-1]
+    else:
+        identifier = re.sub(r".*?\/", "/", resource_str).replace("/", "")
+
+    return identifier
+
+
+def get_page_id(resource: URIRef, catalog_graph: Graph) -> str:
+    """
+    Safe file/xref target id. This should be used for filenames and xrefs.
+    """
+    display_id = get_id(resource=resource, catalog_graph=catalog_graph)
+    return _sanitize_page_id(display_id)
 
 
 def add_to_nav(file_name: str, output_dir: str, resource: URIRef, catalog_graph: Graph):
