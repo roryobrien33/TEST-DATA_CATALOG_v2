@@ -103,7 +103,7 @@ jobs:
               return s.includes(":") && !isIri(s);
             }
 
-            // Entity creation helpers (may generate new IDs)
+            // -------- entity creation helpers (generate IDs only on create) --------
             function normalizeOrGenerateConceptId(raw, prefLabel) {
               const s = (raw || "").trim();
               if (s) {
@@ -134,7 +134,7 @@ jobs:
               return `sdcdc:metric-${slugify(prefLabel)}-${randomToken6()}`;
             }
 
-            // Reference helpers (must NOT invent new random IDs)
+            // -------- reference helpers (must NOT invent random IDs) --------
             function normalizeConceptRef(raw) {
               const s = (raw || "").trim();
               if (!s) return "";
@@ -259,14 +259,6 @@ jobs:
               if (!dataset_description_B) errors.push("Missing: Dataset description");
               if (!dataset_use_case_B) errors.push("Missing: Dataset use case");
               if (!location_B) errors.push("Missing: Geographical Location (high-level)");
-
-              const badPolicyRefs = parseRefCsv(policy_ids_B, normalizePolicyRef).filter(x => !x.includes(":"));
-              const badMetricRefs = parseRefCsv(metric_ids_B, normalizeMetricRef).filter(x => !x.includes(":"));
-              const badConceptRefs = parseRefCsv(concepts_B, normalizeConceptRef).filter(x => !x.includes(":"));
-
-              if (badPolicyRefs.length) errors.push("Policy IDs must be existing IDs (e.g. sdcdc:policy-... or policy-...)");
-              if (badMetricRefs.length) errors.push("Metric IDs must be existing IDs (e.g. sdcdc:metric-... or metric-...)");
-              if (badConceptRefs.length) errors.push("Concept IDs must be existing IDs (e.g. sdcdc:concept-... or concept-...)");
             }
 
             if (isEditDataset) {
@@ -286,14 +278,6 @@ jobs:
               if (!hasAnyEdit) {
                 errors.push("No editable fields were provided. Fill at least one optional field to update the dataset.");
               }
-
-              const badPolicyRefs = parseRefCsv(policy_ids_C, normalizePolicyRef).filter(x => !x.includes(":"));
-              const badMetricRefs = parseRefCsv(metric_ids_C, normalizeMetricRef).filter(x => !x.includes(":"));
-              const badConceptRefs = parseRefCsv(concepts_C, normalizeConceptRef).filter(x => !x.includes(":"));
-
-              if (badPolicyRefs.length) errors.push("Policy IDs must be existing IDs (e.g. sdcdc:policy-... or policy-...)");
-              if (badMetricRefs.length) errors.push("Metric IDs must be existing IDs (e.g. sdcdc:metric-... or metric-...)");
-              if (badConceptRefs.length) errors.push("Concept IDs must be existing IDs (e.g. sdcdc:concept-... or concept-...)");
             }
 
             if (isRemoveDataset) {
@@ -542,8 +526,30 @@ jobs:
           import json
           import os
           import pathlib
+          import random
           import re
           import yaml
+
+          def slugify(value: str) -> str:
+              s = str(value or "").strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def base36(num: int) -> str:
+              chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              if num == 0:
+                  return "0"
+              parts = []
+              while num:
+                  num, rem = divmod(num, 36)
+                  parts.append(chars[rem])
+              return "".join(reversed(parts))
+
+          def random_token6() -> str:
+              n = random.randint(0, (36 ** 6) - 1)
+              return base36(n).rjust(6, "0")
 
           def norm_use_case(s: str) -> str:
               s = s.strip().lower()
@@ -552,7 +558,11 @@ jobs:
               s = re.sub(r"-+", "-", s).strip("-")
               return s
 
-          def normalize_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+          def generate_dataset_id(catalog_id_value: str, dataset_short_id: str) -> str:
+              ds_slug = slugify(dataset_short_id)
+              return f"sdcdc:{catalog_id_value}-{ds_slug}-{random_token6()}"
+
+          def normalize_dataset_id_for_create(catalog_id_value: str, dataset_id_value: str) -> str:
               s = dataset_id_value.strip()
               if not s:
                   return s
@@ -560,7 +570,7 @@ jobs:
                   return s
               if ":" in s:
                   return s
-              return f"sdcdc:{catalog_id_value}-{s}"
+              return generate_dataset_id(catalog_id_value, s)
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -585,7 +595,7 @@ jobs:
           if not isinstance(datasets, list):
               raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
 
-          dataset_identifier = normalize_dataset_id(catalog_id, dataset_identifier_raw)
+          dataset_identifier = normalize_dataset_id_for_create(catalog_id, dataset_identifier_raw)
           dataset_use_case = norm_use_case(dataset_use_case_raw)
 
           allowed = catalog.get("use_cases", []) or []
@@ -624,6 +634,7 @@ jobs:
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Updated: {p}")
+          print(f"Dataset ID: {dataset_identifier}")
           PY
         env:
           CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_B }}
@@ -649,6 +660,13 @@ jobs:
           import re
           import yaml
 
+          def slugify(value: str) -> str:
+              s = str(value or "").strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
           def norm_use_case(s: str) -> str:
               s = s.strip().lower()
               s = re.sub(r"[\s_]+", "-", s)
@@ -656,15 +674,36 @@ jobs:
               s = re.sub(r"-+", "-", s).strip("-")
               return s
 
-          def normalize_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+          def resolve_existing_dataset_id(catalog_id_value: str, dataset_id_value: str, datasets: list) -> str:
               s = dataset_id_value.strip()
               if not s:
                   return s
-              if s.startswith("http://") or s.startswith("https://"):
+
+              # If full CURIE / exact ID provided, use directly
+              if s.startswith("http://") or s.startswith("https://") or ":" in s:
                   return s
-              if ":" in s:
-                  return s
-              return f"sdcdc:{catalog_id_value}-{s}"
+
+              ds_slug = slugify(s)
+              prefix = f"sdcdc:{catalog_id_value}-{ds_slug}"
+              matches = []
+
+              for ds in datasets:
+                  if not isinstance(ds, dict):
+                      continue
+                  ds_id = str(ds.get("id") or ds.get("identifier") or "").strip()
+                  if ds_id == prefix or ds_id.startswith(prefix + "-"):
+                      matches.append(ds_id)
+
+              if len(matches) == 1:
+                  return matches[0]
+
+              if len(matches) > 1:
+                  raise SystemExit(
+                      f"Dataset identifier '{s}' is ambiguous. Please use the full dataset ID."
+                  )
+
+              # Fallback exact unsuffixed form
+              return prefix
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -689,7 +728,7 @@ jobs:
           if not isinstance(datasets, list):
             raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
 
-          dataset_identifier = normalize_dataset_id(catalog_id, dataset_identifier_raw)
+          dataset_identifier = resolve_existing_dataset_id(catalog_id, dataset_identifier_raw, datasets)
 
           target = None
           for ds in datasets:
@@ -755,18 +794,45 @@ jobs:
           python - <<'PY'
           import os
           import pathlib
+          import re
           import yaml
           import datetime
 
-          def normalize_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+          def slugify(value: str) -> str:
+              s = str(value or "").strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def resolve_existing_dataset_id(catalog_id_value: str, dataset_id_value: str, datasets: list) -> str:
               s = dataset_id_value.strip()
               if not s:
                   return s
-              if s.startswith("http://") or s.startswith("https://"):
+
+              if s.startswith("http://") or s.startswith("https://") or ":" in s:
                   return s
-              if ":" in s:
-                  return s
-              return f"sdcdc:{catalog_id_value}-{s}"
+
+              ds_slug = slugify(s)
+              prefix = f"sdcdc:{catalog_id_value}-{ds_slug}"
+              matches = []
+
+              for ds in datasets:
+                  if not isinstance(ds, dict):
+                      continue
+                  ds_id = str(ds.get("id") or ds.get("identifier") or "").strip()
+                  if ds_id == prefix or ds_id.startswith(prefix + "-"):
+                      matches.append(ds_id)
+
+              if len(matches) == 1:
+                  return matches[0]
+
+              if len(matches) > 1:
+                  raise SystemExit(
+                      f"Dataset identifier '{s}' is ambiguous. Please use the full dataset ID."
+                  )
+
+              return prefix
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -789,7 +855,7 @@ jobs:
           if not isinstance(deleted_datasets, list):
             raise SystemExit("Invalid catalog YAML structure: deleted_datasets must be a list")
 
-          dataset_identifier = normalize_dataset_id(catalog_id, dataset_identifier_raw)
+          dataset_identifier = resolve_existing_dataset_id(catalog_id, dataset_identifier_raw, datasets)
 
           removed_dataset = None
           kept_datasets = []
