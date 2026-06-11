@@ -95,36 +95,76 @@ jobs:
                 .filter(Boolean);
             }
 
-            function normalizeConceptId(raw) {
-              const s = (raw || "").trim();
-              if (!s) return "";
-              if (s.startsWith("http://") || s.startsWith("https://")) return s;
-              if (s.includes(":")) return s;
-              return `sdcdc:${s}`;
+            function isIri(s) {
+              return s.startsWith("http://") || s.startsWith("https://");
             }
 
-            function parseConceptIdCsv(raw) {
+            function isCurie(s) {
+              return s.includes(":") && !isIri(s);
+            }
+
+            // Entity creation helpers (may generate new IDs)
+            function normalizeOrGenerateConceptId(raw, prefLabel) {
+              const s = (raw || "").trim();
+              if (s) {
+                if (isIri(s) || isCurie(s)) return s;
+                if (s.startsWith("concept-")) return `sdcdc:${s}`;
+                return `sdcdc:${s}`;
+              }
+              return `sdcdc:concept-${slugify(prefLabel)}-${randomToken6()}`;
+            }
+
+            function normalizeOrGeneratePolicyId(raw, title) {
+              const s = (raw || "").trim();
+              if (s) {
+                if (isIri(s) || isCurie(s)) return s;
+                if (s.startsWith("policy-")) return `sdcdc:${s}`;
+                return `sdcdc:${s}`;
+              }
+              return `sdcdc:policy-${slugify(title)}-${randomToken6()}`;
+            }
+
+            function normalizeOrGenerateMetricId(raw, prefLabel) {
+              const s = (raw || "").trim();
+              if (s) {
+                if (isIri(s) || isCurie(s)) return s;
+                if (s.startsWith("metric-")) return `sdcdc:${s}`;
+                return `sdcdc:${s}`;
+              }
+              return `sdcdc:metric-${slugify(prefLabel)}-${randomToken6()}`;
+            }
+
+            // Reference helpers (must NOT invent new random IDs)
+            function normalizeConceptRef(raw) {
+              const s = (raw || "").trim();
+              if (!s) return "";
+              if (isIri(s) || isCurie(s)) return s;
+              if (s.startsWith("concept-")) return `sdcdc:${s}`;
+              return s;
+            }
+
+            function normalizePolicyRef(raw) {
+              const s = (raw || "").trim();
+              if (!s) return "";
+              if (isIri(s) || isCurie(s)) return s;
+              if (s.startsWith("policy-")) return `sdcdc:${s}`;
+              return s;
+            }
+
+            function normalizeMetricRef(raw) {
+              const s = (raw || "").trim();
+              if (!s) return "";
+              if (isIri(s) || isCurie(s)) return s;
+              if (s.startsWith("metric-")) return `sdcdc:${s}`;
+              return s;
+            }
+
+            function parseRefCsv(raw, normalizer) {
               if (!raw) return [];
               return raw
                 .split(",")
-                .map(x => normalizeConceptId(x))
+                .map(x => normalizer(x))
                 .filter(Boolean);
-            }
-
-            function normalizePolicyId(raw) {
-              const s = (raw || "").trim();
-              if (!s) return "";
-              if (s.startsWith("http://") || s.startsWith("https://")) return s;
-              if (s.includes(":")) return s;
-              return `plcy:${s}`;
-            }
-
-            function normalizeMetricId(raw) {
-              const s = (raw || "").trim();
-              if (!s) return "";
-              if (s.startsWith("http://") || s.startsWith("https://")) return s;
-              if (s.includes(":")) return s;
-              return `sdcdc:${s}`;
             }
 
             const labels = (context.payload.issue.labels || []).map(l => l.name);
@@ -219,6 +259,14 @@ jobs:
               if (!dataset_description_B) errors.push("Missing: Dataset description");
               if (!dataset_use_case_B) errors.push("Missing: Dataset use case");
               if (!location_B) errors.push("Missing: Geographical Location (high-level)");
+
+              const badPolicyRefs = parseRefCsv(policy_ids_B, normalizePolicyRef).filter(x => !x.includes(":"));
+              const badMetricRefs = parseRefCsv(metric_ids_B, normalizeMetricRef).filter(x => !x.includes(":"));
+              const badConceptRefs = parseRefCsv(concepts_B, normalizeConceptRef).filter(x => !x.includes(":"));
+
+              if (badPolicyRefs.length) errors.push("Policy IDs must be existing IDs (e.g. sdcdc:policy-... or policy-...)");
+              if (badMetricRefs.length) errors.push("Metric IDs must be existing IDs (e.g. sdcdc:metric-... or metric-...)");
+              if (badConceptRefs.length) errors.push("Concept IDs must be existing IDs (e.g. sdcdc:concept-... or concept-...)");
             }
 
             if (isEditDataset) {
@@ -238,6 +286,14 @@ jobs:
               if (!hasAnyEdit) {
                 errors.push("No editable fields were provided. Fill at least one optional field to update the dataset.");
               }
+
+              const badPolicyRefs = parseRefCsv(policy_ids_C, normalizePolicyRef).filter(x => !x.includes(":"));
+              const badMetricRefs = parseRefCsv(metric_ids_C, normalizeMetricRef).filter(x => !x.includes(":"));
+              const badConceptRefs = parseRefCsv(concepts_C, normalizeConceptRef).filter(x => !x.includes(":"));
+
+              if (badPolicyRefs.length) errors.push("Policy IDs must be existing IDs (e.g. sdcdc:policy-... or policy-...)");
+              if (badMetricRefs.length) errors.push("Metric IDs must be existing IDs (e.g. sdcdc:metric-... or metric-...)");
+              if (badConceptRefs.length) errors.push("Concept IDs must be existing IDs (e.g. sdcdc:concept-... or concept-...)");
             }
 
             if (isRemoveDataset) {
@@ -273,27 +329,21 @@ jobs:
 
             let generated_concept_id = "";
             if (isCreateConcept && concept_pref_label_E) {
-              generated_concept_id = concept_id_E
-                ? normalizeConceptId(concept_id_E)
-                : `sdcdc:concept-${slugify(concept_pref_label_E)}`;
+              generated_concept_id = normalizeOrGenerateConceptId(concept_id_E, concept_pref_label_E);
             }
 
             let generated_policy_id = "";
             if (isCreatePolicy && policy_title_F) {
-              generated_policy_id = policy_id_F
-                ? normalizePolicyId(policy_id_F)
-                : `plcy:${slugify(policy_title_F)}`;
+              generated_policy_id = normalizeOrGeneratePolicyId(policy_id_F, policy_title_F);
             }
 
             let generated_metric_id = "";
             if (isCreateMetric && metric_pref_label_G) {
-              generated_metric_id = metric_id_G
-                ? normalizeMetricId(metric_id_G)
-                : `sdcdc:metric-${slugify(metric_pref_label_G)}`;
+              generated_metric_id = normalizeOrGenerateMetricId(metric_id_G, metric_pref_label_G);
             }
 
-            const normalized_parent_concept_id_E = normalizeConceptId(parent_concept_id_E);
-            const normalized_child_concept_ids_E = parseConceptIdCsv(child_concept_ids_E);
+            const normalized_parent_concept_id_E = normalizeConceptRef(parent_concept_id_E);
+            const normalized_child_concept_ids_E = parseRefCsv(child_concept_ids_E, normalizeConceptRef);
 
             core.setOutput("errors", JSON.stringify(errors));
 
@@ -318,9 +368,9 @@ jobs:
             core.setOutput("dataset_description_B", dataset_description_B);
             core.setOutput("dataset_use_case_B", dataset_use_case_B);
             core.setOutput("location_B", location_B);
-            core.setOutput("concepts_B", concepts_B);
-            core.setOutput("policy_ids_B", policy_ids_B);
-            core.setOutput("metric_ids_B", metric_ids_B);
+            core.setOutput("concepts_B", JSON.stringify(parseRefCsv(concepts_B, normalizeConceptRef)));
+            core.setOutput("policy_ids_B", JSON.stringify(parseRefCsv(policy_ids_B, normalizePolicyRef)));
+            core.setOutput("metric_ids_B", JSON.stringify(parseRefCsv(metric_ids_B, normalizeMetricRef)));
             core.setOutput("distributions_B", distributions_B);
 
             core.setOutput("catalog_id_existing_C", catalog_id_existing_C);
@@ -329,9 +379,9 @@ jobs:
             core.setOutput("dataset_description_C", dataset_description_C);
             core.setOutput("dataset_use_case_C", dataset_use_case_C);
             core.setOutput("location_C", location_C);
-            core.setOutput("concepts_C", concepts_C);
-            core.setOutput("policy_ids_C", policy_ids_C);
-            core.setOutput("metric_ids_C", metric_ids_C);
+            core.setOutput("concepts_C", JSON.stringify(parseRefCsv(concepts_C, normalizeConceptRef)));
+            core.setOutput("policy_ids_C", JSON.stringify(parseRefCsv(policy_ids_C, normalizePolicyRef)));
+            core.setOutput("metric_ids_C", JSON.stringify(parseRefCsv(metric_ids_C, normalizeMetricRef)));
             core.setOutput("distributions_C", distributions_C);
 
             core.setOutput("catalog_id_existing_D", catalog_id_existing_D);
@@ -430,15 +480,10 @@ jobs:
           python - <<'PY'
           import os
           import pathlib
-          import sys
+          import re
           import yaml
 
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import generate_catalog_id, normalize_catalog_id, normalize_id_base, normalizeUseCase if False else None
-          # use local helper below to avoid changing behavior unexpectedly
-
           def norm_use_case(s: str) -> str:
-              import re
               s = s.strip().lower()
               s = re.sub(r"[\s_]+", "-", s)
               s = re.sub(r"[^a-z0-9-]", "-", s)
@@ -494,19 +539,11 @@ jobs:
           set -euo pipefail
 
           python - <<'PY'
+          import json
           import os
           import pathlib
           import re
-          import sys
           import yaml
-
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import (
-              normalize_dataset_id,
-              normalize_policy_id,
-              normalize_metric_id,
-              parse_csv_ids,
-          )
 
           def norm_use_case(s: str) -> str:
               s = s.strip().lower()
@@ -515,15 +552,25 @@ jobs:
               s = re.sub(r"-+", "-", s).strip("-")
               return s
 
+          def normalize_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+              s = dataset_id_value.strip()
+              if not s:
+                  return s
+              if s.startswith("http://") or s.startswith("https://"):
+                  return s
+              if ":" in s:
+                  return s
+              return f"sdcdc:{catalog_id_value}-{s}"
+
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
           dataset_title = os.environ["DATASET_TITLE"].strip()
           dataset_description = os.environ["DATASET_DESCRIPTION"].strip()
           dataset_use_case_raw = os.environ["DATASET_USE_CASE"].strip()
           location = os.environ["LOCATION"].strip()
-          concepts_raw = os.environ.get("CONCEPTS", "").strip()
-          policy_ids_raw = os.environ.get("POLICY_IDS", "").strip()
-          metric_ids_raw = os.environ.get("METRIC_IDS", "").strip()
+          concepts = json.loads(os.environ.get("CONCEPTS", "[]"))
+          policy_ids = json.loads(os.environ.get("POLICY_IDS", "[]"))
+          metric_ids = json.loads(os.environ.get("METRIC_IDS", "[]"))
           distributions_raw = os.environ.get("DISTRIBUTIONS", "").strip()
 
           p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
@@ -553,9 +600,6 @@ jobs:
               if ds_id == dataset_identifier:
                   raise SystemExit(f"Dataset identifier already exists in catalog: {dataset_identifier}")
 
-          concepts = [x.strip() for x in concepts_raw.split(",") if x.strip()]
-          policy_ids = parse_csv_ids(policy_ids_raw, normalize_policy_id)
-          metric_ids = parse_csv_ids(metric_ids_raw, normalize_metric_id)
           distributions = [x.strip() for x in distributions_raw.splitlines() if x.strip()]
 
           new_ds = {
@@ -599,19 +643,11 @@ jobs:
           set -euo pipefail
 
           python - <<'PY'
+          import json
           import os
           import pathlib
           import re
-          import sys
           import yaml
-
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import (
-              normalize_dataset_id,
-              normalize_policy_id,
-              normalize_metric_id,
-              parse_csv_ids,
-          )
 
           def norm_use_case(s: str) -> str:
               s = s.strip().lower()
@@ -620,15 +656,25 @@ jobs:
               s = re.sub(r"-+", "-", s).strip("-")
               return s
 
+          def normalize_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+              s = dataset_id_value.strip()
+              if not s:
+                  return s
+              if s.startswith("http://") or s.startswith("https://"):
+                  return s
+              if ":" in s:
+                  return s
+              return f"sdcdc:{catalog_id_value}-{s}"
+
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
           dataset_title = os.environ.get("DATASET_TITLE", "").strip()
           dataset_description = os.environ.get("DATASET_DESCRIPTION", "").strip()
           dataset_use_case_raw = os.environ.get("DATASET_USE_CASE", "").strip()
           location = os.environ.get("LOCATION", "").strip()
-          concepts_raw = os.environ.get("CONCEPTS", "").strip()
-          policy_ids_raw = os.environ.get("POLICY_IDS", "").strip()
-          metric_ids_raw = os.environ.get("METRIC_IDS", "").strip()
+          concepts = json.loads(os.environ.get("CONCEPTS", "[]"))
+          policy_ids = json.loads(os.environ.get("POLICY_IDS", "[]"))
+          metric_ids = json.loads(os.environ.get("METRIC_IDS", "[]"))
           distributions_raw = os.environ.get("DISTRIBUTIONS", "").strip()
 
           p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
@@ -674,14 +720,14 @@ jobs:
           if location:
             target["location"] = location
 
-          if concepts_raw:
-            target["concepts"] = [x.strip() for x in concepts_raw.split(",") if x.strip()]
+          if concepts:
+            target["concepts"] = concepts
 
-          if policy_ids_raw:
-            target["policies"] = parse_csv_ids(policy_ids_raw, normalize_policy_id)
+          if policy_ids:
+            target["policies"] = policy_ids
 
-          if metric_ids_raw:
-            target["metrics"] = parse_csv_ids(metric_ids_raw, normalize_metric_id)
+          if metric_ids:
+            target["metrics"] = metric_ids
 
           if distributions_raw:
             target["distributions"] = [x.strip() for x in distributions_raw.splitlines() if x.strip()]
@@ -709,12 +755,18 @@ jobs:
           python - <<'PY'
           import os
           import pathlib
-          import sys
           import yaml
           import datetime
 
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import normalize_dataset_id
+          def normalize_dataset_id(catalog_id_value: str, dataset_id_value: str) -> str:
+              s = dataset_id_value.strip()
+              if not s:
+                  return s
+              if s.startswith("http://") or s.startswith("https://"):
+                  return s
+              if ":" in s:
+                  return s
+              return f"sdcdc:{catalog_id_value}-{s}"
 
           catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
           dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
@@ -783,17 +835,13 @@ jobs:
           set -euo pipefail
 
           python - <<'PY'
+          import json
           import os
           import pathlib
           import re
-          import sys
           import yaml
-          import json
 
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import normalize_concept_id, generate_concept_id
-
-          concept_id_raw = os.environ["CONCEPT_ID"].strip()
+          concept_id = os.environ["CONCEPT_ID"].strip()
           concept_pref_label = os.environ["CONCEPT_PREF_LABEL"].strip()
           concept_definition = os.environ["CONCEPT_DEFINITION"].strip()
           concept_alt_label = os.environ.get("CONCEPT_ALT_LABEL", "").strip()
@@ -801,8 +849,6 @@ jobs:
           relationship_type = os.environ.get("RELATIONSHIP_TYPE", "").strip().lower()
           parent_concept_id = os.environ.get("PARENT_CONCEPT_ID", "").strip()
           child_concept_ids = json.loads(os.environ.get("CHILD_CONCEPT_IDS", "[]"))
-
-          concept_id = normalize_concept_id(concept_id_raw) if concept_id_raw else generate_concept_id(concept_pref_label)
 
           def file_stem_from_id(value: str) -> str:
             s = value.strip()
@@ -837,14 +883,13 @@ jobs:
             doc["concept"]["example"] = concept_example
 
           if relationship_type == "child concept" and parent_concept_id:
-            doc["concept"]["broader"] = normalize_concept_id(parent_concept_id)
+            doc["concept"]["broader"] = parent_concept_id
 
           if relationship_type == "parent concept" and child_concept_ids:
-            doc["concept"]["narrower"] = [normalize_concept_id(x) for x in child_concept_ids]
+            doc["concept"]["narrower"] = child_concept_ids
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote concept file: {p}")
-          print(f"Concept ID: {concept_id}")
           PY
         env:
           CONCEPT_ID: ${{ steps.parse.outputs.concept_id_E }}
@@ -865,17 +910,11 @@ jobs:
           import os
           import pathlib
           import re
-          import sys
           import yaml
 
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import normalize_policy_id, generate_policy_id
-
-          policy_id_raw = os.environ["POLICY_ID"].strip()
+          policy_id = os.environ["POLICY_ID"].strip()
           policy_title = os.environ["POLICY_TITLE"].strip()
           policy_description = os.environ["POLICY_DESCRIPTION"].strip()
-
-          policy_id = normalize_policy_id(policy_id_raw) if policy_id_raw else generate_policy_id(policy_title)
 
           def file_stem_from_id(value: str) -> str:
             s = value.strip()
@@ -905,7 +944,6 @@ jobs:
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote policy file: {p}")
-          print(f"Policy ID: {policy_id}")
           PY
         env:
           POLICY_ID: ${{ steps.parse.outputs.policy_id_F }}
@@ -921,19 +959,13 @@ jobs:
           import os
           import pathlib
           import re
-          import sys
           import yaml
 
-          sys.path.insert(0, str(pathlib.Path("scripts").resolve()))
-          from id_utils import normalize_metric_id, generate_metric_id
-
-          metric_id_raw = os.environ["METRIC_ID"].strip()
+          metric_id = os.environ["METRIC_ID"].strip()
           metric_pref_label = os.environ["METRIC_PREF_LABEL"].strip()
           metric_definition = os.environ["METRIC_DEFINITION"].strip()
           metric_expected_data_type = os.environ.get("METRIC_EXPECTED_DATA_TYPE", "").strip()
           metric_dimension = os.environ.get("METRIC_DIMENSION", "").strip()
-
-          metric_id = normalize_metric_id(metric_id_raw) if metric_id_raw else generate_metric_id(metric_pref_label)
 
           def file_stem_from_id(value: str) -> str:
             s = value.strip()
@@ -969,7 +1001,6 @@ jobs:
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote metric file: {p}")
-          print(f"Metric ID: {metric_id}")
           PY
         env:
           METRIC_ID: ${{ steps.parse.outputs.metric_id_G }}
