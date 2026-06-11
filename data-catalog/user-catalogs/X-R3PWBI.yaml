@@ -12,8 +12,11 @@ datasets:
   use_case: a-a
   location: Dublin, Ireland
   concepts:
-  - sdcdc:concept-voltage
-  - sdcdc:concept-harmonics
+  - sdcdc:concept-oo-0EE60X
+  policies:
+  - sdcdc:policy-nt-UB889G
+  metrics:
+  - sdcdc:metric-zz-PK0OGK
 - id: sdcdc:X-R3PWBI-W
   title: W
   description: W
