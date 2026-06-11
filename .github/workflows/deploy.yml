@@ -315,11 +315,14 @@ jobs:
           print("OK: wrote docs/index.html")
           PY
 
-      - name: Upload Artifacts
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
+          name: catalog-pages-artifact
           path: docs/
 
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: catalog-pages-artifact
