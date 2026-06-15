@@ -2,7 +2,6 @@ from pathlib import Path
 import yaml
 
 from rdflib import Graph, URIRef, DCAT, Namespace
-from rdflib.namespace import RDF, DCTERMS
 from simple_data_catalog_generator.page_creation_functions import (
     write_file,
     get_title,
@@ -14,8 +13,6 @@ from simple_data_catalog_generator.page_creation_functions import (
 from simple_data_catalog_generator.create_distribution_table import create_distribution_table
 
 SDCDC = Namespace("https://www.uuidea.eu/profiles/data-catalog/")
-DQV = Namespace("http://www.w3.org/ns/dqv#")
-ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
 
 def _first_literal(graph: Graph, subject: URIRef, predicates):
@@ -57,6 +54,9 @@ def _candidate_catalog_names(raw_id: str, title: str):
 
 
 def _load_source_dataset_yaml(dataset: URIRef, catalog_graph: Graph):
+    """
+    Load the source dataset entry from the original user catalog YAML.
+    """
     linked_series = catalog_graph.value(dataset, DCAT.inSeries)
     if linked_series is None:
         return {}
@@ -83,6 +83,7 @@ def _load_source_dataset_yaml(dataset: URIRef, catalog_graph: Graph):
         for yf in catalog_files:
             doc = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
             cat = doc.get("catalog", {}) or {}
+
             cat_id = str(cat.get("id") or cat.get("identifier") or "").strip()
             cat_title = str(cat.get("title") or cat.get("name") or "").strip()
 
@@ -163,6 +164,14 @@ def _simple_id_table(ids, label_singular: str) -> str:
 
 
 def _source_distribution_table(distributions) -> str:
+    """
+    Render structured distributions from source YAML.
+    Expected shape:
+      distributions:
+        - format: text/turtle
+          access_url: https://...
+          issued: 2026-06-11
+    """
     if not distributions:
         return "No distributions available.\n\n"
 
@@ -244,8 +253,10 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     if not isinstance(source_distributions, list):
         source_distributions = []
 
+    # Title
     adoc_str += "= " + dataset_name + "\n\n"
 
+    # Dataset details
     adoc_str += "== Dataset Details\n\n"
     adoc_str += f"* **Name:** {dataset_name}\n"
     adoc_str += f"* **ID:** `{dataset_id}`\n"
@@ -275,21 +286,26 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
 
     adoc_str += "\n"
 
+    # Description section
     adoc_str += "== Description\n\n"
     if dataset_description and dataset_description != "None":
         adoc_str += dataset_description + "\n\n"
     else:
         adoc_str += "No description available.\n\n"
 
+    # Themes
     adoc_str += "== Themes\n\n"
     adoc_str += _linked_concepts_table(dataset=dataset, catalog_graph=catalog_graph)
 
+    # Policies
     adoc_str += "== Policies\n\n"
     adoc_str += _simple_id_table(policy_ids, "Policy")
 
+    # Metrics
     adoc_str += "== Metrics\n\n"
     adoc_str += _simple_id_table(metric_ids, "Metric")
 
+    # Distributions
     adoc_str += "== Distributions\n\n"
     if source_distributions:
         adoc_str += _source_distribution_table(source_distributions)
@@ -298,6 +314,7 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "No distributions available.\n\n"
 
+    # Overview
     adoc_str += "== Overview\n\n"
     adoc_str += (
         f"|===\n"
