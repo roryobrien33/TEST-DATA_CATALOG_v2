@@ -1,68 +1,62 @@
+from rdflib import Graph, URIRef, DCAT
+from simple_data_catalog_generator.page_creation_functions import get_id
 
 
-from rdflib import Namespace, URIRef, Graph, DCTERMS, DCAT
-from simple_data_catalog_generator.create_adoc_table import create_adoc_table
-
-
-
-def create_distribution_table(dataset: URIRef, catalog_graph: Graph):
+def create_distribution_table(dataset: URIRef, catalog_graph: Graph) -> str:
     """
-    Generate an AsciiDoc table that lists all distributions associated with the
-    given dataset URI.
-
-    The table now has **three** columns:
-      1. **Format** – value of ``dcterms:format`` on the distribution
-      2. **Access URL** – value of ``dcat:accessURL`` on the distribution
-      3. **Issued** – value of ``dcterms:issued`` on the *dataset* (same for every
-         row of the table)
-
-    Args:
-        dataset: The URI of the dataset to document.
-        catalog_graph: An RDF ``Graph`` containing the catalog data (e.g. the
-            contents of ``data-catalog/data-catalog.ttl``).
-
-    Returns:
-        str: An AsciiDoc table string.  If the dataset has no distributions,
-        an empty string is returned.
+    Render graph-backed distributions if present.
+    Fallback text if no RDF distributions are available.
     """
-    # --------------------------------------------------------------
-    # 1️⃣  Gather all distribution URIs linked to the dataset
-    # --------------------------------------------------------------
-    distribution_uris = list(catalog_graph.objects(dataset, DCAT.distribution))
+    distributions = list(catalog_graph.objects(dataset, DCAT.distribution))
 
-    if not distribution_uris:
-        # No distributions – nothing to render
-        return ""
+    if not distributions:
+        return "No distributions available.\n\n"
 
+    rows = []
 
-    # --------------------------------------------------------------
-    # 3️⃣  Extract relevant information from each distribution
-    # --------------------------------------------------------------
-    # Table header row
-    entries = ["Format", "Access URL", "Issued"]
+    for dist in distributions:
+        format_value = ""
+        access_url = ""
+        issued = ""
 
-    for dist in distribution_uris:
-        # dcterms:format (e.g. "csv")
-        fmt = catalog_graph.value(subject=dist, predicate=DCTERMS.format)
- 
-        fmt_str = str(fmt) if fmt else "—"
+        for fmt in catalog_graph.objects(dist, DCAT.mediaType):
+            format_value = str(fmt).strip()
+            if format_value:
+                break
 
-        # dcat:accessURL (e.g. "https://example.com/file.csv")
-        url = catalog_graph.value(subject=dist, predicate=DCAT.accessURL)
-        url_str = str(url) if url else "—"
+        for url in catalog_graph.objects(dist, DCAT.accessURL):
+            access_url = str(url).strip()
+            if access_url:
+                break
 
-        issued_val = catalog_graph.value(subject=dist, predicate=DCTERMS.issued)
-        issued_str = str(issued_val) if issued_val else "—"
+        for dt in catalog_graph.objects(dist, DCAT.releaseDate):
+            issued = str(dt).strip()
+            if issued:
+                break
 
-        # Append the three cells for this row
-        entries.extend([fmt_str, url_str, issued_str])
+        if not format_value:
+            format_value = "Not available"
+        if not access_url:
+            access_url = "Not available"
+        if not issued:
+            issued = "–"
 
-    # --------------------------------------------------------------
-    # 4️⃣  Build the AsciiDoc table (3 columns)
-    # --------------------------------------------------------------
-    table_adoc = create_adoc_table(entries=entries, num_cols=3)
+        rows.append((format_value.lower(), format_value, access_url, issued))
 
-    # --------------------------------------------------------------
-    # 5️⃣  Return the generated table
-    # --------------------------------------------------------------
-    return table_adoc
+    rows.sort(key=lambda x: x[0])
+
+    table_str = "|===\n"
+    table_str += "| Format | Access URL | Issued\n\n"
+
+    for _, fmt, access_url, issued in rows:
+        if access_url != "Not available":
+            access_cell = f"link:{access_url}[{access_url}]"
+        else:
+            access_cell = access_url
+
+        table_str += f"| {fmt}\n"
+        table_str += f"| {access_cell}\n"
+        table_str += f"| {issued}\n\n"
+
+    table_str += "|===\n\n"
+    return table_str
