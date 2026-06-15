@@ -103,7 +103,6 @@ jobs:
               return s.includes(":") && !isIri(s);
             }
 
-            // -------- entity creation helpers (generate IDs only on create) --------
             function normalizeOrGenerateConceptId(raw, prefLabel) {
               const s = (raw || "").trim();
               if (s) {
@@ -134,7 +133,6 @@ jobs:
               return `sdcdc:metric-${slugify(prefLabel)}-${randomToken6()}`;
             }
 
-            // -------- reference helpers (must NOT invent random IDs) --------
             function normalizeConceptRef(raw) {
               const s = (raw || "").trim();
               if (!s) return "";
@@ -167,6 +165,49 @@ jobs:
                 .filter(Boolean);
             }
 
+            function validateDistributions(raw) {
+              const errors = [];
+              if (!raw || !raw.trim()) return errors;
+
+              const blocks = raw.trim().split(/\n\s*\n/);
+
+              blocks.forEach((block, idx) => {
+                const lines = block.split(/\n/).map(x => x.trim()).filter(Boolean);
+                const obj = {};
+
+                for (const line of lines) {
+                  if (!line.includes(":")) {
+                    errors.push(`Distribution block ${idx + 1}: invalid line '${line}'. Use 'Field: value' format.`);
+                    continue;
+                  }
+                  const [k, ...rest] = line.split(":");
+                  const key = k.trim().toLowerCase();
+                  const value = rest.join(":").trim();
+
+                  if (key === "format") obj.format = value;
+                  else if (key === "access url") obj.access_url = value;
+                  else if (key === "issued") obj.issued = value;
+                  else errors.push(`Distribution block ${idx + 1}: unknown field '${k.trim()}'. Allowed fields are Format, Access URL, Issued.`);
+                }
+
+                if (!obj.format) {
+                  errors.push(`Distribution block ${idx + 1}: missing Format.`);
+                }
+
+                if (!obj.access_url) {
+                  errors.push(`Distribution block ${idx + 1}: missing Access URL.`);
+                } else if (!(obj.access_url.startsWith("http://") || obj.access_url.startsWith("https://"))) {
+                  errors.push(`Distribution block ${idx + 1}: Access URL must start with http:// or https://.`);
+                }
+
+                if (obj.issued && !/^\d{4}-\d{2}-\d{2}$/.test(obj.issued)) {
+                  errors.push(`Distribution block ${idx + 1}: Issued must use YYYY-MM-DD format.`);
+                }
+              });
+
+              return errors;
+            }
+
             const labels = (context.payload.issue.labels || []).map(l => l.name);
 
             const isCreateCatalog = labels.includes("catalog-create");
@@ -177,14 +218,12 @@ jobs:
             const isCreatePolicy = labels.includes("catalog-create-policy");
             const isCreateMetric = labels.includes("catalog-create-metric");
 
-            // Create catalog fields
             const catalog_name_A = getField("Catalog name");
             const catalog_description_A = getField("Catalog description");
             const catalog_use_cases_A = getField("Allowed use cases (comma-separated)");
             const catalog_owner_A = getField("Catalog owner / organisation (optional)");
             const catalog_contact_A = getField("Contact (optional)");
 
-            // Add dataset fields
             const catalog_id_existing_B = getField("Catalog ID (existing)");
             const dataset_identifier_B = getField("Dataset identifier");
             const dataset_title_B = getField("Dataset title");
@@ -196,7 +235,6 @@ jobs:
             const metric_ids_B = getField("Metric IDs (optional, comma-separated)");
             const distributions_B = getField("Distributions (optional)");
 
-            // Edit dataset fields
             const catalog_id_existing_C = getField("Catalog ID (existing)");
             const dataset_identifier_C = getField("Dataset identifier");
             const dataset_title_C = getField("Dataset title (optional)");
@@ -208,11 +246,9 @@ jobs:
             const metric_ids_C = getField("Metric IDs (optional, comma-separated)");
             const distributions_C = getField("Distributions (optional)");
 
-            // Remove dataset fields
             const catalog_id_existing_D = getField("Catalog ID (existing)");
             const dataset_identifier_D = getField("Dataset identifier");
 
-            // Create concept fields
             const concept_id_E = getField("Concept ID (optional)");
             const concept_pref_label_E = getField("Concept preferred label");
             const concept_definition_E = getField("Concept definition");
@@ -222,12 +258,10 @@ jobs:
             const parent_concept_id_E = getField("Parent concept ID (required if child concept)");
             const child_concept_ids_E = getField("Child concept IDs (optional if parent concept)");
 
-            // Create policy fields
             const policy_id_F = getField("Policy ID (optional)");
             const policy_title_F = getField("Policy title");
             const policy_description_F = getField("Policy description");
 
-            // Create metric fields
             const metric_id_G = getField("Metric ID (optional)");
             const metric_pref_label_G = getField("Metric preferred label");
             const metric_definition_G = getField("Metric definition");
@@ -249,6 +283,7 @@ jobs:
               if (!dataset_description_B) errors.push("Missing: Dataset description");
               if (!dataset_use_case_B) errors.push("Missing: Dataset use case");
               if (!location_B) errors.push("Missing: Geographical Location (high-level)");
+              errors.push(...validateDistributions(distributions_B));
             }
 
             if (isEditDataset) {
@@ -268,6 +303,8 @@ jobs:
               if (!hasAnyEdit) {
                 errors.push("No editable fields were provided. Fill at least one optional field to update the dataset.");
               }
+
+              errors.push(...validateDistributions(distributions_C));
             }
 
             if (isRemoveDataset) {
@@ -396,54 +433,6 @@ jobs:
               body: msg
             });
             core.setFailed("Validation failed");
-
-      - name: Comment generated Catalog ID
-        if: ${{ steps.parse.outputs.is_create_catalog == 'true' }}
-        uses: actions/github-script@v8
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: "Generated Catalog ID: `${{ steps.parse.outputs.generated_catalog_id }}`"
-            });
-
-      - name: Comment concept ID
-        if: ${{ steps.parse.outputs.is_create_concept == 'true' }}
-        uses: actions/github-script@v8
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: "Concept ID: `${{ steps.parse.outputs.concept_id_E }}`"
-            });
-
-      - name: Comment policy ID
-        if: ${{ steps.parse.outputs.is_create_policy == 'true' }}
-        uses: actions/github-script@v8
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: "Policy ID: `${{ steps.parse.outputs.policy_id_F }}`"
-            });
-
-      - name: Comment metric ID
-        if: ${{ steps.parse.outputs.is_create_metric == 'true' }}
-        uses: actions/github-script@v8
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: "Metric ID: `${{ steps.parse.outputs.metric_id_G }}`"
-            });
 
       - name: Create catalog YAML
         if: ${{ steps.parse.outputs.is_create_catalog == 'true' }}
@@ -895,29 +884,29 @@ jobs:
           kept_datasets = []
 
           for ds in datasets:
-            ds_id = ds.get("id") or ds.get("identifier")
-            if ds_id == dataset_identifier and removed_dataset is None:
-              removed_dataset = ds
-            else:
-              kept_datasets.append(ds)
+              ds_id = ds.get("id") or ds.get("identifier")
+              if ds_id == dataset_identifier and removed_dataset is None:
+                  removed_dataset = ds
+              else:
+                  kept_datasets.append(ds)
 
           if removed_dataset is None:
-            raise SystemExit(f"Dataset not found in catalog: {dataset_identifier}")
+              raise SystemExit(f"Dataset not found in catalog: {dataset_identifier}")
 
           tombstone = {
-            "id": removed_dataset.get("id") or removed_dataset.get("identifier") or dataset_identifier,
-            "title": removed_dataset.get("title", ""),
-            "description": removed_dataset.get("description", ""),
-            "deleted_at": datetime.date.today().isoformat(),
+              "id": removed_dataset.get("id") or removed_dataset.get("identifier") or dataset_identifier,
+              "title": removed_dataset.get("title", ""),
+              "description": removed_dataset.get("description", ""),
+              "deleted_at": datetime.date.today().isoformat(),
           }
 
           already_logged = any(
-            isinstance(item, dict) and str(item.get("id", "")).strip() == tombstone["id"]
-            for item in deleted_datasets
+              isinstance(item, dict) and str(item.get("id", "")).strip() == tombstone["id"]
+              for item in deleted_datasets
           )
 
           if not already_logged:
-            deleted_datasets.append(tombstone)
+              deleted_datasets.append(tombstone)
 
           doc["datasets"] = kept_datasets
           doc["deleted_datasets"] = deleted_datasets
@@ -950,42 +939,42 @@ jobs:
           child_concept_ids = json.loads(os.environ.get("CHILD_CONCEPT_IDS", "[]"))
 
           def file_stem_from_id(value: str) -> str:
-            s = value.strip()
-            if ":" in s:
-              s = s.split(":", 1)[1]
-            if "/" in s:
-              s = s.rstrip("/").split("/")[-1]
-            if "#" in s:
-              s = s.split("#")[-1]
-            s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
-            return s
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
 
           file_stem = file_stem_from_id(concept_id)
           p = pathlib.Path(f"data-catalog/concepts/{file_stem}.yaml")
           p.parent.mkdir(parents=True, exist_ok=True)
 
           if p.exists():
-            raise SystemExit(f"Concept file already exists: {p}")
+              raise SystemExit(f"Concept file already exists: {p}")
 
           doc = {
-            "concept": {
-              "identifier": concept_id,
-              "prefLabel": concept_pref_label,
-              "definition": concept_definition,
-            }
+              "concept": {
+                  "identifier": concept_id,
+                  "prefLabel": concept_pref_label,
+                  "definition": concept_definition,
+              }
           }
 
           if concept_alt_label:
-            doc["concept"]["altLabel"] = concept_alt_label
+              doc["concept"]["altLabel"] = concept_alt_label
 
           if concept_example:
-            doc["concept"]["example"] = concept_example
+              doc["concept"]["example"] = concept_example
 
           if relationship_type == "child concept" and parent_concept_id:
-            doc["concept"]["broader"] = parent_concept_id
+              doc["concept"]["broader"] = parent_concept_id
 
           if relationship_type == "parent concept" and child_concept_ids:
-            doc["concept"]["narrower"] = child_concept_ids
+              doc["concept"]["narrower"] = child_concept_ids
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote concept file: {p}")
@@ -1015,29 +1004,29 @@ jobs:
           policy_description = os.environ["POLICY_DESCRIPTION"].strip()
 
           def file_stem_from_id(value: str) -> str:
-            s = value.strip()
-            if ":" in s:
-              s = s.split(":", 1)[1]
-            if "/" in s:
-              s = s.rstrip("/").split("/")[-1]
-            if "#" in s:
-              s = s.split("#")[-1]
-            s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
-            return s
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
 
           file_stem = file_stem_from_id(policy_id)
           p = pathlib.Path(f"data-catalog/policies/{file_stem}.yaml")
           p.parent.mkdir(parents=True, exist_ok=True)
 
           if p.exists():
-            raise SystemExit(f"Policy file already exists: {p}")
+              raise SystemExit(f"Policy file already exists: {p}")
 
           doc = {
-            "policy": {
-              "uid": policy_id,
-              "title": policy_title,
-              "description": policy_description,
-            }
+              "policy": {
+                  "uid": policy_id,
+                  "title": policy_title,
+                  "description": policy_description,
+              }
           }
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
@@ -1065,36 +1054,36 @@ jobs:
           metric_dimension = os.environ.get("METRIC_DIMENSION", "").strip()
 
           def file_stem_from_id(value: str) -> str:
-            s = value.strip()
-            if ":" in s:
-              s = s.split(":", 1)[1]
-            if "/" in s:
-              s = s.rstrip("/").split("/")[-1]
-            if "#" in s:
-              s = s.split("#")[-1]
-            s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
-            return s
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
 
           file_stem = file_stem_from_id(metric_id)
           p = pathlib.Path(f"data-catalog/metrics/{file_stem}.yaml")
           p.parent.mkdir(parents=True, exist_ok=True)
 
           if p.exists():
-            raise SystemExit(f"Metric file already exists: {p}")
+              raise SystemExit(f"Metric file already exists: {p}")
 
           doc = {
-            "metric": {
-              "identifier": metric_id,
-              "prefLabel": metric_pref_label,
-              "definition": metric_definition,
-            }
+              "metric": {
+                  "identifier": metric_id,
+                  "prefLabel": metric_pref_label,
+                  "definition": metric_definition,
+              }
           }
 
           if metric_expected_data_type:
-            doc["metric"]["expectedDataType"] = metric_expected_data_type
+              doc["metric"]["expectedDataType"] = metric_expected_data_type
 
           if metric_dimension:
-            doc["metric"]["inDimension"] = metric_dimension
+              doc["metric"]["inDimension"] = metric_dimension
 
           p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
           print(f"Wrote metric file: {p}")
