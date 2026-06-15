@@ -16,6 +16,7 @@ SDCDC = Namespace("https://www.uuidea.eu/profiles/data-catalog/")
 DQV = Namespace("http://www.w3.org/ns/dqv#")
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
+adoc_str += "== DEBUG DATASET PAGE\n\nThis is the updated dataset page file.\n\n"
 
 def _first_literal(graph: Graph, subject: URIRef, predicates):
     for pred in predicates:
