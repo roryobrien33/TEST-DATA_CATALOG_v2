@@ -1,4 +1,39 @@
-- name: Parse Issue Form fields
+name: Issue Forms to Catalog YAML to PR
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  intake:
+    if: |
+      contains(github.event.issue.labels.*.name, 'catalog-create') ||
+      contains(github.event.issue.labels.*.name, 'catalog-add-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-edit-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-remove-dataset') ||
+      contains(github.event.issue.labels.*.name, 'catalog-create-concept') ||
+      contains(github.event.issue.labels.*.name, 'catalog-create-policy') ||
+      contains(github.event.issue.labels.*.name, 'catalog-create-metric')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install --upgrade pip pyyaml
+
+      - name: Parse Issue Form fields
         id: parse
         uses: actions/github-script@v8
         with:
@@ -390,3 +425,710 @@
             core.setOutput("metric_definition_G", metric_definition_G);
             core.setOutput("metric_expected_data_type_G", metric_expected_data_type_G);
             core.setOutput("metric_dimension_G", metric_dimension_G);
+
+      - name: Comment and stop on validation errors
+        if: ${{ fromJSON(steps.parse.outputs.errors)[0] != null }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const errors = JSON.parse(`${{ steps.parse.outputs.errors }}`);
+            const msg =
+              "Catalog intake validation failed\n\n" +
+              errors.map(e => "- " + e).join("\n") +
+              "\n\nPlease edit the issue to fix these fields, then the workflow will re-run.";
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: msg
+            });
+            core.setFailed("Validation failed");
+
+      - name: Create catalog YAML
+        if: ${{ steps.parse.outputs.is_create_catalog == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import yaml
+
+          def norm_use_case(s: str) -> str:
+              s = s.strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          catalog_id = os.environ["CATALOG_ID"].strip()
+          catalog_name = os.environ["CATALOG_NAME"].strip()
+          catalog_description = os.environ["CATALOG_DESCRIPTION"].strip()
+          raw_use_cases = os.environ["CATALOG_USE_CASES"].strip()
+          owner = os.environ.get("CATALOG_OWNER", "").strip()
+          contact = os.environ.get("CATALOG_CONTACT", "").strip()
+
+          use_cases = [norm_use_case(x) for x in raw_use_cases.split(",")]
+          use_cases = [x for x in use_cases if x]
+
+          p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
+          p.parent.mkdir(parents=True, exist_ok=True)
+
+          if p.exists():
+              raise SystemExit(f"Catalog file already exists: {p}")
+
+          doc = {
+              "catalog": {
+                  "id": catalog_id,
+                  "title": catalog_name,
+                  "description": catalog_description,
+                  "version": 1,
+                  "use_cases": use_cases,
+              },
+              "datasets": []
+          }
+
+          if owner:
+              doc["catalog"]["owner"] = owner
+          if contact:
+              doc["catalog"]["contact"] = contact
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Wrote: {p}")
+          PY
+        env:
+          CATALOG_ID: ${{ steps.parse.outputs.generated_catalog_id }}
+          CATALOG_NAME: ${{ steps.parse.outputs.catalog_name_A }}
+          CATALOG_DESCRIPTION: ${{ steps.parse.outputs.catalog_description_A }}
+          CATALOG_USE_CASES: ${{ steps.parse.outputs.catalog_use_cases_A }}
+          CATALOG_OWNER: ${{ steps.parse.outputs.catalog_owner_A }}
+          CATALOG_CONTACT: ${{ steps.parse.outputs.catalog_contact_A }}
+
+      - name: Add dataset to catalog YAML
+        if: ${{ steps.parse.outputs.is_add_dataset == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import random
+          import re
+          import yaml
+
+          def slugify(value: str) -> str:
+              s = str(value or "").strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def base36(num: int) -> str:
+              chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              if num == 0:
+                  return "0"
+              parts = []
+              while num:
+                  num, rem = divmod(num, 36)
+                  parts.append(chars[rem])
+              return "".join(reversed(parts))
+
+          def random_token6() -> str:
+              n = random.randint(0, (36 ** 6) - 1)
+              return base36(n).rjust(6, "0")
+
+          def norm_use_case(s: str) -> str:
+              s = s.strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def generate_dataset_id(catalog_id_value: str, dataset_short_id: str) -> str:
+              ds_slug = slugify(dataset_short_id)
+              return f"sdcdc:{catalog_id_value}-{ds_slug}-{random_token6()}"
+
+          def parse_distributions(raw: str):
+              if not raw.strip():
+                  return []
+
+              blocks = re.split(r"\n\s*\n", raw.strip())
+              out = []
+
+              for block in blocks:
+                  record = {}
+                  for line in block.splitlines():
+                      line = line.strip()
+                      if not line or ":" not in line:
+                          continue
+                      key, value = line.split(":", 1)
+                      key = key.strip().lower()
+                      value = value.strip()
+
+                      if key == "format":
+                          record["format"] = value
+                      elif key == "access url":
+                          record["access_url"] = value
+                      elif key == "issued":
+                          record["issued"] = value
+
+                  if record:
+                      out.append(record)
+
+              return out
+
+          catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
+          dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
+          dataset_title = os.environ["DATASET_TITLE"].strip()
+          dataset_description = os.environ["DATASET_DESCRIPTION"].strip()
+          dataset_use_case_raw = os.environ["DATASET_USE_CASE"].strip()
+          location = os.environ["LOCATION"].strip()
+          concepts = json.loads(os.environ.get("CONCEPTS", "[]"))
+          policy_ids = json.loads(os.environ.get("POLICY_IDS", "[]"))
+          metric_ids = json.loads(os.environ.get("METRIC_IDS", "[]"))
+          distributions_raw = os.environ.get("DISTRIBUTIONS", "")
+
+          p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
+          if not p.exists():
+              raise SystemExit(f"Catalog not found: {p}")
+
+          doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+          catalog = doc.get("catalog", {}) or {}
+          datasets = doc.get("datasets", [])
+          if datasets is None:
+              datasets = []
+          if not isinstance(datasets, list):
+              raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
+
+          dataset_identifier = dataset_identifier_raw.strip()
+          if not (dataset_identifier.startswith("http://") or dataset_identifier.startswith("https://") or ":" in dataset_identifier):
+              dataset_identifier = generate_dataset_id(catalog_id, dataset_identifier)
+
+          dataset_use_case = norm_use_case(dataset_use_case_raw)
+
+          allowed = catalog.get("use_cases", []) or []
+          if dataset_use_case not in allowed:
+              raise SystemExit(
+                  f"Use case not allowed for this catalog. Provided: '{dataset_use_case_raw}' "
+                  f"(normalized: '{dataset_use_case}'). Allowed: {', '.join(allowed)}"
+              )
+
+          for ds in datasets:
+              ds_id = ds.get("id") or ds.get("identifier")
+              if ds_id == dataset_identifier:
+                  raise SystemExit(f"Dataset identifier already exists in catalog: {dataset_identifier}")
+
+          distributions = parse_distributions(distributions_raw)
+
+          new_ds = {
+              "id": dataset_identifier,
+              "title": dataset_title,
+              "description": dataset_description,
+              "use_case": dataset_use_case,
+              "location": location,
+          }
+
+          if concepts:
+              new_ds["concepts"] = concepts
+          if policy_ids:
+              new_ds["policies"] = policy_ids
+          if metric_ids:
+              new_ds["metrics"] = metric_ids
+          if distributions:
+              new_ds["distributions"] = distributions
+
+          datasets.append(new_ds)
+          doc["datasets"] = datasets
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Updated: {p}")
+          print(f"Dataset ID: {dataset_identifier}")
+          PY
+        env:
+          CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_B }}
+          DATASET_IDENTIFIER: ${{ steps.parse.outputs.dataset_identifier_B }}
+          DATASET_TITLE: ${{ steps.parse.outputs.dataset_title_B }}
+          DATASET_DESCRIPTION: ${{ steps.parse.outputs.dataset_description_B }}
+          DATASET_USE_CASE: ${{ steps.parse.outputs.dataset_use_case_B }}
+          LOCATION: ${{ steps.parse.outputs.location_B }}
+          CONCEPTS: ${{ steps.parse.outputs.concepts_B }}
+          POLICY_IDS: ${{ steps.parse.outputs.policy_ids_B }}
+          METRIC_IDS: ${{ steps.parse.outputs.metric_ids_B }}
+          DISTRIBUTIONS: ${{ steps.parse.outputs.distributions_B }}
+
+      - name: Edit dataset in catalog YAML
+        if: ${{ steps.parse.outputs.is_edit_dataset == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import yaml
+
+          def slugify(value: str) -> str:
+              s = str(value or "").strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def norm_use_case(s: str) -> str:
+              s = s.strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def resolve_existing_dataset_id(catalog_id_value: str, dataset_id_value: str, datasets: list) -> str:
+              s = dataset_id_value.strip()
+              if not s:
+                  return s
+
+              if s.startswith("http://") or s.startswith("https://") or ":" in s:
+                  return s
+
+              ds_slug = slugify(s)
+              prefix = f"sdcdc:{catalog_id_value}-{ds_slug}"
+              matches = []
+
+              for ds in datasets:
+                  if not isinstance(ds, dict):
+                      continue
+                  ds_id = str(ds.get("id") or ds.get("identifier") or "").strip()
+                  if ds_id == prefix or ds_id.startswith(prefix + "-"):
+                      matches.append(ds_id)
+
+              if len(matches) == 1:
+                  return matches[0]
+
+              if len(matches) > 1:
+                  raise SystemExit(
+                      f"Dataset identifier '{s}' is ambiguous. Please use the full dataset ID."
+                  )
+
+              return prefix
+
+          def parse_distributions(raw: str):
+              if not raw.strip():
+                  return []
+
+              blocks = re.split(r"\n\s*\n", raw.strip())
+              out = []
+
+              for block in blocks:
+                  record = {}
+                  for line in block.splitlines():
+                      line = line.strip()
+                      if not line or ":" not in line:
+                          continue
+                      key, value = line.split(":", 1)
+                      key = key.strip().lower()
+                      value = value.strip()
+
+                      if key == "format":
+                          record["format"] = value
+                      elif key == "access url":
+                          record["access_url"] = value
+                      elif key == "issued":
+                          record["issued"] = value
+
+                  if record:
+                      out.append(record)
+
+              return out
+
+          catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
+          dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
+          dataset_title = os.environ.get("DATASET_TITLE", "").strip()
+          dataset_description = os.environ.get("DATASET_DESCRIPTION", "").strip()
+          dataset_use_case_raw = os.environ.get("DATASET_USE_CASE", "").strip()
+          location = os.environ.get("LOCATION", "").strip()
+          concepts = json.loads(os.environ.get("CONCEPTS", "[]"))
+          policy_ids = json.loads(os.environ.get("POLICY_IDS", "[]"))
+          metric_ids = json.loads(os.environ.get("METRIC_IDS", "[]"))
+          distributions_raw = os.environ.get("DISTRIBUTIONS", "")
+
+          p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
+          if not p.exists():
+              raise SystemExit(f"Catalog not found: {p}")
+
+          doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+          catalog = doc.get("catalog", {}) or {}
+          datasets = doc.get("datasets", [])
+          if datasets is None:
+              datasets = []
+          if not isinstance(datasets, list):
+              raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
+
+          dataset_identifier = resolve_existing_dataset_id(catalog_id, dataset_identifier_raw, datasets)
+
+          target = None
+          for ds in datasets:
+              ds_id = ds.get("id") or ds.get("identifier")
+              if ds_id == dataset_identifier:
+                  target = ds
+                  break
+
+          if target is None:
+              raise SystemExit(f"Dataset not found in catalog: {dataset_identifier}")
+
+          if dataset_title:
+              target["title"] = dataset_title
+
+          if dataset_description:
+              target["description"] = dataset_description
+
+          if dataset_use_case_raw:
+              dataset_use_case = norm_use_case(dataset_use_case_raw)
+              allowed = catalog.get("use_cases", []) or []
+              if dataset_use_case not in allowed:
+                  raise SystemExit(
+                      f"Use case not allowed for this catalog. Provided: '{dataset_use_case_raw}' "
+                      f"(normalized: '{dataset_use_case}'). Allowed: {', '.join(allowed)}"
+                  )
+              target["use_case"] = dataset_use_case
+
+          if location:
+              target["location"] = location
+
+          if concepts:
+              target["concepts"] = concepts
+
+          if policy_ids:
+              target["policies"] = policy_ids
+
+          if metric_ids:
+              target["metrics"] = metric_ids
+
+          if distributions_raw.strip():
+              target["distributions"] = parse_distributions(distributions_raw)
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Updated: {p}")
+          PY
+        env:
+          CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_C }}
+          DATASET_IDENTIFIER: ${{ steps.parse.outputs.dataset_identifier_C }}
+          DATASET_TITLE: ${{ steps.parse.outputs.dataset_title_C }}
+          DATASET_DESCRIPTION: ${{ steps.parse.outputs.dataset_description_C }}
+          DATASET_USE_CASE: ${{ steps.parse.outputs.dataset_use_case_C }}
+          LOCATION: ${{ steps.parse.outputs.location_C }}
+          CONCEPTS: ${{ steps.parse.outputs.concepts_C }}
+          POLICY_IDS: ${{ steps.parse.outputs.policy_ids_C }}
+          METRIC_IDS: ${{ steps.parse.outputs.metric_ids_C }}
+          DISTRIBUTIONS: ${{ steps.parse.outputs.distributions_C }}
+
+      - name: Remove dataset from catalog YAML
+        if: ${{ steps.parse.outputs.is_remove_dataset == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import yaml
+          import datetime
+
+          def slugify(value: str) -> str:
+              s = str(value or "").strip().lower()
+              s = re.sub(r"[\s_]+", "-", s)
+              s = re.sub(r"[^a-z0-9-]", "-", s)
+              s = re.sub(r"-+", "-", s).strip("-")
+              return s
+
+          def resolve_existing_dataset_id(catalog_id_value: str, dataset_id_value: str, datasets: list) -> str:
+              s = dataset_id_value.strip()
+              if not s:
+                  return s
+
+              if s.startswith("http://") or s.startswith("https://") or ":" in s:
+                  return s
+
+              ds_slug = slugify(s)
+              prefix = f"sdcdc:{catalog_id_value}-{ds_slug}"
+              matches = []
+
+              for ds in datasets:
+                  if not isinstance(ds, dict):
+                      continue
+                  ds_id = str(ds.get("id") or ds.get("identifier") or "").strip()
+                  if ds_id == prefix or ds_id.startswith(prefix + "-"):
+                      matches.append(ds_id)
+
+              if len(matches) == 1:
+                  return matches[0]
+
+              if len(matches) > 1:
+                  raise SystemExit(
+                      f"Dataset identifier '{s}' is ambiguous. Please use the full dataset ID."
+                  )
+
+              return prefix
+
+          catalog_id = os.environ["CATALOG_ID_EXISTING"].strip()
+          dataset_identifier_raw = os.environ["DATASET_IDENTIFIER"].strip()
+
+          p = pathlib.Path(f"data-catalog/user-catalogs/{catalog_id}.yaml")
+          if not p.exists():
+              raise SystemExit(f"Catalog not found: {p}")
+
+          doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+          datasets = doc.get("datasets", [])
+          if datasets is None:
+              datasets = []
+          if not isinstance(datasets, list):
+              raise SystemExit("Invalid catalog YAML structure: datasets must be a list")
+
+          deleted_datasets = doc.get("deleted_datasets", [])
+          if deleted_datasets is None:
+              deleted_datasets = []
+          if not isinstance(deleted_datasets, list):
+              raise SystemExit("Invalid catalog YAML structure: deleted_datasets must be a list")
+
+          dataset_identifier = resolve_existing_dataset_id(catalog_id, dataset_identifier_raw, datasets)
+
+          removed_dataset = None
+          kept_datasets = []
+
+          for ds in datasets:
+              ds_id = ds.get("id") or ds.get("identifier")
+              if ds_id == dataset_identifier and removed_dataset is None:
+                  removed_dataset = ds
+              else:
+                  kept_datasets.append(ds)
+
+          if removed_dataset is None:
+              raise SystemExit(f"Dataset not found in catalog: {dataset_identifier}")
+
+          tombstone = {
+              "id": removed_dataset.get("id") or removed_dataset.get("identifier") or dataset_identifier,
+              "title": removed_dataset.get("title", ""),
+              "description": removed_dataset.get("description", ""),
+              "deleted_at": datetime.date.today().isoformat(),
+          }
+
+          already_logged = any(
+              isinstance(item, dict) and str(item.get("id", "")).strip() == tombstone["id"]
+              for item in deleted_datasets
+          )
+
+          if not already_logged:
+              deleted_datasets.append(tombstone)
+
+          doc["datasets"] = kept_datasets
+          doc["deleted_datasets"] = deleted_datasets
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Removed dataset {dataset_identifier} from {catalog_id} and recorded it in deleted_datasets")
+          PY
+        env:
+          CATALOG_ID_EXISTING: ${{ steps.parse.outputs.catalog_id_existing_D }}
+          DATASET_IDENTIFIER: ${{ steps.parse.outputs.dataset_identifier_D }}
+
+      - name: Create concept YAML
+        if: ${{ steps.parse.outputs.is_create_concept == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import yaml
+
+          concept_id = os.environ["CONCEPT_ID"].strip()
+          concept_pref_label = os.environ["CONCEPT_PREF_LABEL"].strip()
+          concept_definition = os.environ["CONCEPT_DEFINITION"].strip()
+          concept_alt_label = os.environ.get("CONCEPT_ALT_LABEL", "").strip()
+          concept_example = os.environ.get("CONCEPT_EXAMPLE", "").strip()
+          relationship_type = os.environ.get("RELATIONSHIP_TYPE", "").strip().lower()
+          parent_concept_id = os.environ.get("PARENT_CONCEPT_ID", "").strip()
+          child_concept_ids = json.loads(os.environ.get("CHILD_CONCEPT_IDS", "[]"))
+
+          def file_stem_from_id(value: str) -> str:
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
+
+          file_stem = file_stem_from_id(concept_id)
+          p = pathlib.Path(f"data-catalog/concepts/{file_stem}.yaml")
+          p.parent.mkdir(parents=True, exist_ok=True)
+
+          if p.exists():
+              raise SystemExit(f"Concept file already exists: {p}")
+
+          doc = {
+              "concept": {
+                  "identifier": concept_id,
+                  "prefLabel": concept_pref_label,
+                  "definition": concept_definition,
+              }
+          }
+
+          if concept_alt_label:
+              doc["concept"]["altLabel"] = concept_alt_label
+
+          if concept_example:
+              doc["concept"]["example"] = concept_example
+
+          if relationship_type == "child concept" and parent_concept_id:
+              doc["concept"]["broader"] = parent_concept_id
+
+          if relationship_type == "parent concept" and child_concept_ids:
+              doc["concept"]["narrower"] = child_concept_ids
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Wrote concept file: {p}")
+          PY
+        env:
+          CONCEPT_ID: ${{ steps.parse.outputs.concept_id_E }}
+          CONCEPT_PREF_LABEL: ${{ steps.parse.outputs.concept_pref_label_E }}
+          CONCEPT_DEFINITION: ${{ steps.parse.outputs.concept_definition_E }}
+          CONCEPT_ALT_LABEL: ${{ steps.parse.outputs.concept_alt_label_E }}
+          CONCEPT_EXAMPLE: ${{ steps.parse.outputs.concept_example_E }}
+          RELATIONSHIP_TYPE: ${{ steps.parse.outputs.relationship_type_E }}
+          PARENT_CONCEPT_ID: ${{ steps.parse.outputs.parent_concept_id_E }}
+          CHILD_CONCEPT_IDS: ${{ steps.parse.outputs.child_concept_ids_E }}
+
+      - name: Create policy YAML
+        if: ${{ steps.parse.outputs.is_create_policy == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import yaml
+
+          policy_id = os.environ["POLICY_ID"].strip()
+          policy_title = os.environ["POLICY_TITLE"].strip()
+          policy_description = os.environ["POLICY_DESCRIPTION"].strip()
+
+          def file_stem_from_id(value: str) -> str:
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
+
+          file_stem = file_stem_from_id(policy_id)
+          p = pathlib.Path(f"data-catalog/policies/{file_stem}.yaml")
+          p.parent.mkdir(parents=True, exist_ok=True)
+
+          if p.exists():
+              raise SystemExit(f"Policy file already exists: {p}")
+
+          doc = {
+              "policy": {
+                  "uid": policy_id,
+                  "title": policy_title,
+                  "description": policy_description,
+              }
+          }
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Wrote policy file: {p}")
+          PY
+        env:
+          POLICY_ID: ${{ steps.parse.outputs.policy_id_F }}
+          POLICY_TITLE: ${{ steps.parse.outputs.policy_title_F }}
+          POLICY_DESCRIPTION: ${{ steps.parse.outputs.policy_description_F }}
+
+      - name: Create metric YAML
+        if: ${{ steps.parse.outputs.is_create_metric == 'true' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+          import yaml
+
+          metric_id = os.environ["METRIC_ID"].strip()
+          metric_pref_label = os.environ["METRIC_PREF_LABEL"].strip()
+          metric_definition = os.environ["METRIC_DEFINITION"].strip()
+          metric_expected_data_type = os.environ.get("METRIC_EXPECTED_DATA_TYPE", "").strip()
+          metric_dimension = os.environ.get("METRIC_DIMENSION", "").strip()
+
+          def file_stem_from_id(value: str) -> str:
+              s = value.strip()
+              if ":" in s:
+                  s = s.split(":", 1)[1]
+              if "/" in s:
+                  s = s.rstrip("/").split("/")[-1]
+              if "#" in s:
+                  s = s.split("#")[-1]
+              s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
+              return s
+
+          file_stem = file_stem_from_id(metric_id)
+          p = pathlib.Path(f"data-catalog/metrics/{file_stem}.yaml")
+          p.parent.mkdir(parents=True, exist_ok=True)
+
+          if p.exists():
+              raise SystemExit(f"Metric file already exists: {p}")
+
+          doc = {
+              "metric": {
+                  "identifier": metric_id,
+                  "prefLabel": metric_pref_label,
+                  "definition": metric_definition,
+              }
+          }
+
+          if metric_expected_data_type:
+              doc["metric"]["expectedDataType"] = metric_expected_data_type
+
+          if metric_dimension:
+              doc["metric"]["inDimension"] = metric_dimension
+
+          p.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+          print(f"Wrote metric file: {p}")
+          PY
+        env:
+          METRIC_ID: ${{ steps.parse.outputs.metric_id_G }}
+          METRIC_PREF_LABEL: ${{ steps.parse.outputs.metric_pref_label_G }}
+          METRIC_DEFINITION: ${{ steps.parse.outputs.metric_definition_G }}
+          METRIC_EXPECTED_DATA_TYPE: ${{ steps.parse.outputs.metric_expected_data_type_G }}
+          METRIC_DIMENSION: ${{ steps.parse.outputs.metric_dimension_G }}
+
+      - name: Show pending changes
+        if: ${{ success() }}
+        run: |
+          echo "=== git status --short --untracked-files=all ==="
+          git status --short --untracked-files=all
+          echo "=== git diff --name-only ==="
+          git diff --name-only
+
+      - name: Create Pull Request
+        if: ${{ success() }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          commit-message: "Catalog intake: issue #${{ github.event.issue.number }}"
+          branch: "catalog-intake/${{ github.event.issue.number }}"
+          title: "Catalog intake: issue #${{ github.event.issue.number }}"
+          body: |
+            This PR was automatically generated from issue #${{ github.event.issue.number }}.
+
+            - Labels: `${{ join(github.event.issue.labels.*.name, ', ') }}`
+            - Generated Catalog ID (if applicable): `${{ steps.parse.outputs.generated_catalog_id }}`
+            - Concept ID (if applicable): `${{ steps.parse.outputs.concept_id_E }}`
+            - Policy ID (if applicable): `${{ steps.parse.outputs.policy_id_F }}`
+            - Metric ID (if applicable): `${{ steps.parse.outputs.metric_id_G }}`
+
+            After merge to `main`, the Pages deployment workflow will rebuild and publish the static catalog site.
+          labels: "catalog-intake-pr"
