@@ -13,7 +13,11 @@ jobs:
   intake:
     if: |
       contains(github.event.issue.labels.*.name, 'catalog-add-dataset') ||
-      startsWith(github.event.issue.title, '[Add Dataset]')
+      (
+        contains(github.event.issue.body, '### Dataset identifier') &&
+        contains(github.event.issue.body, '### Dataset title') &&
+        contains(github.event.issue.body, '### Dataset description')
+      )
     runs-on: ubuntu-latest
 
     steps:
