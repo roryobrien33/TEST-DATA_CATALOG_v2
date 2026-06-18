@@ -1,0 +1,4 @@
+﻿concept:
+  identifier: sdcdc:concept-test-001
+  prefLabel: Test Concept 001
+  definition: Minimal test concept for validating the new single-catalog pipeline

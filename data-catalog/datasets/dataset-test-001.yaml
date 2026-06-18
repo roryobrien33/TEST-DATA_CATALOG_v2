@@ -1,0 +1,13 @@
+﻿dataset:
+  identifier: sdcdc:dataset-test-001
+  title: Test Dataset 001
+  description: Minimal test dataset for validating the new single-catalog pipeline
+
+  theme:
+    - sdcdc:concept-test-001
+
+  distribution:
+    - sdcdc:distribution-test-001
+
+  hasPolicy:
+    - sdcdc:policy-test-001

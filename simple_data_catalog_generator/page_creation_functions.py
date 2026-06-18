@@ -9,6 +9,8 @@ DQV = Namespace("http://www.w3.org/ns/dqv#")
 ADMS = Namespace("http://www.w3.org/ns/adms#")
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
+DCAT_DATASET_SERIES = URIRef("http://www.w3.org/ns/dcat#DatasetSeries")
+
 
 def _sanitize_page_id(value: str) -> str:
     """
@@ -63,6 +65,12 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
         if "policy-" in name:
             expanded.append(name[name.find("policy-"):])
 
+        if "distribution-" in name:
+            expanded.append(name[name.find("distribution-"):])
+
+        if "dataset-" in name:
+            expanded.append(name[name.find("dataset-"):])
+
     seen = set()
     final_candidates = []
     for c in expanded:
@@ -107,7 +115,25 @@ def _policy_identifier_from_source_yaml(resource: URIRef) -> str:
         resource=resource,
         entity_dir="policies",
         yaml_key="policy",
-        id_field="uid",
+        id_field="identifier",
+    )
+
+
+def _distribution_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="distributions",
+        yaml_key="distribution",
+        id_field="identifier",
+    )
+
+
+def _dataset_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="datasets",
+        yaml_key="dataset",
+        id_field="identifier",
     )
 
 
@@ -129,7 +155,7 @@ def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
     elif rdf_type == DCAT.DataService:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:dataservice:{page_id}.adoc[{title}]"
-    elif rdf_type == DCAT.DatasetSeries:
+    elif rdf_type == DCAT_DATASET_SERIES:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:dataset-series:{page_id}.adoc[{title}]"
     elif rdf_type == DCAT.Catalog:
@@ -138,6 +164,9 @@ def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
     elif rdf_type == ODRL.Policy:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:policy:{page_id}.adoc[{title}]"
+    elif rdf_type == DCAT.Distribution:
+        title = get_title(subject=resource, graph=catalog_graph)
+        local_link = f"xref:distribution:{page_id}.adoc[{title}]"
     else:
         local_link = ""
 
@@ -214,7 +243,7 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
 
     Priority:
     1. dcterms:identifier from RDF graph
-    2. source YAML fallback for concept / metric / policy
+    2. source YAML fallback for concept / metric / policy / distribution / dataset
     3. URI-derived fallback
     """
     identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
@@ -237,6 +266,16 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
         policy_identifier = _policy_identifier_from_source_yaml(resource)
         if policy_identifier:
             return policy_identifier
+
+    if rdf_type == DCAT.Distribution:
+        distribution_identifier = _distribution_identifier_from_source_yaml(resource)
+        if distribution_identifier:
+            return distribution_identifier
+
+    if rdf_type == DCAT.Dataset:
+        dataset_identifier = _dataset_identifier_from_source_yaml(resource)
+        if dataset_identifier:
+            return dataset_identifier
 
     resource_str = str(resource)
 

@@ -1,0 +1,5 @@
+﻿catalog:
+  identifier: sdcdc:catalog-main-001
+  title: AI-EFFECT Data Catalog
+  description: Single-catalog structure for the data catalog system
+  version: "1.0"
