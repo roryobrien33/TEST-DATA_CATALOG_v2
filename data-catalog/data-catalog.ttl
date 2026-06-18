@@ -1,15 +1,31 @@
 @prefix dcat: <http://www.w3.org/ns/dcat#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
 @prefix dqv: <http://www.w3.org/ns/dqv#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 @prefix sdcdc: <https://www.uuidea.eu/profiles/data-catalog> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix vcard: <http://www.w3.org/2006/vcard/ns> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+sdcdc:agent-test-001 a foaf:Agent .
 
 sdcdc:catalog-main-001 a dcat:Catalog ;
     dcterms:description "Single-catalog structure for the data catalog system" ;
     dcterms:title "AI-EFFECT Data Catalog" ;
     dcat:version "1.0" .
+
+sdcdc:dataservice-test-001 a dcat:DataService ;
+    dcterms:description "Minimal test data service for validating the new single-catalog model" ;
+    dcterms:title "Test Data Service 001" ;
+    dcat:endpointURL "https://example.com/api" ;
+    dcat:servesDataset sdcdc:dataset-test-001 .
+
+sdcdc:kind-test-001 a vcard:Kind .
+
+sdcdc:license-test-001 a dcterms:LicenseDocument .
+
+sdcdc:period-test-001 a dcterms:PeriodOfTime .
 
 sdcdc:qm-test-001 a dqv:QualityMeasurement ;
     dqv:computedOn sdcdc:dataset-test-001 ;
@@ -19,13 +35,6 @@ sdcdc:qm-test-001 a dqv:QualityMeasurement ;
 sdcdc:concept-test-001 a skos:Concept ;
     skos:definition "Minimal test concept for validating the new single-catalog pipeline" ;
     skos:prefLabel "Test Concept 001" .
-
-sdcdc:dataset-test-001 a dcat:Dataset ;
-    dcterms:description "Minimal test dataset for validating the new single-catalog pipeline" ;
-    dcterms:title "Test Dataset 001" ;
-    dcat:distribution sdcdc:distribution-test-001 ;
-    dcat:theme sdcdc:concept-test-001 ;
-    odrl:hasPolicy sdcdc:policy-test-001 .
 
 sdcdc:distribution-test-001 a dcat:Distribution ;
     dcterms:description "Minimal test distribution for validating the new single-catalog pipeline" ;
@@ -42,12 +51,30 @@ sdcdc:policy-test-001 a odrl:Policy ;
     dcterms:description "Minimal test policy for validating the new single-catalog pipeline" ;
     dcterms:title "Test Policy 001" .
 
+sdcdc:series-test-001 a dcat:DatasetSeries ;
+    dcterms:description "Minimal test dataset series for validating the new single-catalog model" ;
+    dcterms:title "Test Dataset Series 001" .
+
+sdcdc:dataset-test-001 a dcat:Dataset ;
+    dcterms:description "Minimal test dataset for validating the new single-catalog pipeline" ;
+    dcterms:license sdcdc:license-test-001 ;
+    dcterms:publisher sdcdc:agent-test-001 ;
+    dcterms:temporal sdcdc:period-test-001 ;
+    dcterms:title "Test Dataset 001" ;
+    vcard:contactPoint sdcdc:kind-test-001 ;
+    dcat:distribution sdcdc:distribution-test-001 ;
+    dcat:inSeries sdcdc:series-test-001 ;
+    dcat:theme sdcdc:concept-test-001 ;
+    odrl:hasPolicy sdcdc:policy-test-001 .
+
 [] a sdcdc:Container ;
     sdcdc:concepts sdcdc:concept-test-001 ;
     sdcdc:dataCatalog sdcdc:catalog-main-001 ;
+    sdcdc:dataServices sdcdc:dataservice-test-001 ;
     sdcdc:datasets sdcdc:dataset-test-001 ;
     sdcdc:distributions sdcdc:distribution-test-001 ;
     sdcdc:metrics sdcdc:metric-test-001 ;
     sdcdc:policies sdcdc:policy-test-001 ;
-    sdcdc:qualityMeasurements sdcdc:qm-test-001 .
+    sdcdc:qualityMeasurements sdcdc:qm-test-001 ;
+    sdcdc:series sdcdc:series-test-001 .
 

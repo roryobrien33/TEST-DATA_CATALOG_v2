@@ -1,0 +1,5 @@
+﻿agent:
+  identifier: sdcdc:agent-test-001
+  title: Test Agent 001
+  name: Test Agent 001
+  description: Minimal test agent for validating the new single-catalog pipeline

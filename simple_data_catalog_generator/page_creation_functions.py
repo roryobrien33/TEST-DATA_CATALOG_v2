@@ -18,17 +18,14 @@ def _sanitize_page_id(value: str) -> str:
     """
     s = (value or "").strip()
 
-    # Prefer local part after CURIE prefix
     if ":" in s and not s.startswith("http://") and not s.startswith("https://"):
         s = s.split(":", 1)[1]
 
-    # URI fallback
     if "#" in s:
         s = s.split("#")[-1]
     if "/" in s:
         s = s.rstrip("/").split("/")[-1]
 
-    # Safe filename/page id
     s = re.sub(r"[^A-Za-z0-9._-]", "-", s)
     s = re.sub(r"-+", "-", s).strip("-")
     return s
@@ -37,9 +34,6 @@ def _sanitize_page_id(value: str) -> str:
 def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: str, id_field: str) -> str:
     """
     Generic fallback for identifiers when dcterms:identifier is not present in the RDF graph.
-
-    It tries to map a generated/fallback resource URI back to a source YAML file and read
-    the real identifier field from there.
     """
     resource_str = str(resource)
     candidate_names = []
@@ -70,6 +64,9 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
 
         if "dataset-" in name:
             expanded.append(name[name.find("dataset-"):])
+
+        if "series-" in name:
+            expanded.append(name[name.find("series-"):])
 
     seen = set()
     final_candidates = []
@@ -133,6 +130,15 @@ def _dataset_identifier_from_source_yaml(resource: URIRef) -> str:
         resource=resource,
         entity_dir="datasets",
         yaml_key="dataset",
+        id_field="identifier",
+    )
+
+
+def _series_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="dataset-series",
+        yaml_key="datasetSeries",
         id_field="identifier",
     )
 
@@ -209,7 +215,6 @@ def get_title(subject: URIRef, graph: Graph) -> str:
     title_str = str(title)
 
     if title_str == "None" or not title_str.strip():
-        # Fallback for SKOS resources
         pref_label = str(graph.value(subject, SKOS.prefLabel))
         if pref_label != "None" and pref_label.strip():
             return pref_label.strip()
@@ -243,7 +248,7 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
 
     Priority:
     1. dcterms:identifier from RDF graph
-    2. source YAML fallback for concept / metric / policy / distribution / dataset
+    2. source YAML fallback for concept / metric / policy / distribution / dataset / series
     3. URI-derived fallback
     """
     identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
@@ -276,6 +281,11 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
         dataset_identifier = _dataset_identifier_from_source_yaml(resource)
         if dataset_identifier:
             return dataset_identifier
+
+    if rdf_type == DCAT_DATASET_SERIES:
+        series_identifier = _series_identifier_from_source_yaml(resource)
+        if series_identifier:
+            return series_identifier
 
     resource_str = str(resource)
 

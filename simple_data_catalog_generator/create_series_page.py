@@ -1,155 +1,43 @@
-from pathlib import Path
-import yaml
+from rdflib import Graph, URIRef, RDF
+from rdflib.namespace import DCTERMS
 
-from rdflib import Graph, URIRef, DCAT
 from simple_data_catalog_generator.page_creation_functions import (
     write_file,
     get_title,
     get_description,
     create_local_link,
     get_id,
-    get_prefLabel,
-    get_definition,
 )
-from simple_data_catalog_generator.create_metadata_table import create_metadata_table
+
+DCAT_IN_SERIES = URIRef("http://www.w3.org/ns/dcat#inSeries")
+DCAT_DATASET = URIRef("http://www.w3.org/ns/dcat#Dataset")
 
 
-def _candidate_series_names(raw_id: str, title: str):
-    candidates = []
-
-    if raw_id:
-        raw_id = str(raw_id).strip()
-        candidates.append(raw_id)
-
-        if ":" in raw_id:
-            candidates.append(raw_id.split(":", 1)[1])
-
-        if "/" in raw_id:
-            candidates.append(raw_id.rstrip("/").split("/")[-1])
-
-        if "#" in raw_id:
-            candidates.append(raw_id.split("#")[-1])
-
-    if title:
-        candidates.append(str(title).strip())
-
-    seen = set()
-    cleaned = []
-    for c in candidates:
-        c = c.strip()
-        if c and c not in seen:
-            seen.add(c)
-            cleaned.append(c)
-
-    return cleaned
-
-
-def _load_deleted_datasets_for_series(series: URIRef, catalog_graph: Graph):
-    raw_series_id = get_id(series, catalog_graph)
-    series_title = get_title(series, catalog_graph)
-    candidate_names = _candidate_series_names(raw_series_id, series_title)
-
-    source_file = None
-    for name in candidate_names:
-        for ext in (".yaml", ".yml"):
-            candidate = Path(f"data-catalog/user-catalogs/{name}{ext}")
-            if candidate.exists():
-                source_file = candidate
-                break
-        if source_file is not None:
-            break
-
-    if source_file is None:
-        catalog_files = sorted(Path("data-catalog/user-catalogs").glob("*.yaml")) + sorted(
-            Path("data-catalog/user-catalogs").glob("*.yml")
-        )
-
-        for yf in catalog_files:
-            doc = yaml.safe_load(yf.read_text(encoding="utf-8")) or {}
-            cat = doc.get("catalog", {}) or {}
-
-            cat_id = str(cat.get("id") or cat.get("identifier") or "").strip()
-            cat_title = str(cat.get("title") or cat.get("name") or "").strip()
-
-            if cat_id in candidate_names:
-                source_file = yf
-                break
-
-            if series_title and cat_title == series_title:
-                source_file = yf
-                break
-
-    if source_file is None:
-        return []
-
-    doc = yaml.safe_load(source_file.read_text(encoding="utf-8")) or {}
-    deleted_datasets = doc.get("deleted_datasets", [])
-
-    if deleted_datasets is None:
-        return []
-
-    if not isinstance(deleted_datasets, list):
-        return []
-
-    cleaned = []
-    for item in deleted_datasets:
-        if isinstance(item, dict):
-            cleaned.append(item)
-
-    return cleaned
-
-
-def _build_theme_concept_table_for_series(series: URIRef, catalog_graph: Graph) -> str:
-    """
-    Build a table of concepts actually linked to datasets in this series.
-    """
-    concept_to_datasets = {}
-
-    for dataset in catalog_graph.subjects(DCAT.inSeries, series):
-        dataset_id = get_id(dataset, catalog_graph)
-
-        for concept in catalog_graph.objects(dataset, DCAT.theme):
-            concept_to_datasets.setdefault(concept, set()).add(dataset_id)
-
-    if not concept_to_datasets:
-        return "No concepts linked to datasets in this catalog.\n\n"
-
+def _linked_datasets_table(series: URIRef, catalog_graph: Graph) -> str:
     rows = []
-    for concept, linked_dataset_ids in concept_to_datasets.items():
-        concept_name = get_prefLabel(concept, catalog_graph)
-        if not concept_name or concept_name == "None":
-            concept_name = get_title(concept, catalog_graph)
-        if not concept_name or concept_name == "None":
-            concept_name = get_id(concept, catalog_graph)
 
-        concept_id = get_id(concept, catalog_graph)
-        concept_definition = get_definition(concept, catalog_graph)
-        if not concept_definition or concept_definition == "None":
-            concept_definition = "Not available"
+    for dataset in catalog_graph.subjects(DCAT_IN_SERIES, series):
+        dataset_name = get_title(dataset, catalog_graph)
+        if not dataset_name or dataset_name == "None":
+            dataset_name = get_id(dataset, catalog_graph)
 
-        concept_link = create_local_link(concept, catalog_graph)
-        concept_name_display = concept_link if concept_link else concept_name
+        dataset_id = get_id(dataset, catalog_graph)
+        dataset_link = create_local_link(dataset, catalog_graph)
+        dataset_name_display = dataset_link if dataset_link else dataset_name
 
-        rows.append(
-            (
-                concept_name.lower(),
-                concept_name_display,
-                concept_id,
-                len(linked_dataset_ids),
-                concept_definition,
-            )
-        )
+        rows.append((dataset_name.lower(), dataset_name_display, dataset_id))
+
+    if not rows:
+        return "No linked datasets.\n\n"
 
     rows.sort(key=lambda x: x[0])
 
     table_str = "|===\n"
-    table_str += "| Concept | ID | Linked datasets | Definition\n\n"
+    table_str += "| Dataset | ID\n\n"
 
-    for _, concept_name_display, concept_id, linked_count, concept_definition in rows:
-        table_str += f"| {concept_name_display}\n"
-        table_str += f"| `{concept_id}`\n"
-        table_str += f"| {linked_count}\n"
-        table_str += f"| {concept_definition}\n\n"
+    for _, dataset_name_display, dataset_id in rows:
+        table_str += f"| {dataset_name_display}\n"
+        table_str += f"| `{dataset_id}`\n\n"
 
     table_str += "|===\n\n"
     return table_str
@@ -158,78 +46,53 @@ def _build_theme_concept_table_for_series(series: URIRef, catalog_graph: Graph) 
 def create_series_page(series: URIRef, catalog_graph: Graph):
     adoc_str = str()
 
-    deleted_datasets = _load_deleted_datasets_for_series(series, catalog_graph)
-    deleted_ids = {
-        str(item.get("id", "")).strip()
-        for item in deleted_datasets
-        if str(item.get("id", "")).strip()
-    }
+    series_name = get_title(series, catalog_graph)
+    series_id = get_id(series, catalog_graph)
+    series_description = get_description(subject=series, graph=catalog_graph)
 
-    # Title
-    adoc_str += "= " + get_title(series, catalog_graph) + "\n\n"
+    linked_datasets = list(catalog_graph.subjects(DCAT_IN_SERIES, series))
 
-    # Description
+    adoc_str += "= " + series_name + "\n\n"
+
+    adoc_str += "== Series Details\n\n"
+    adoc_str += f"* **Name:** {series_name}\n"
+    adoc_str += f"* **ID:** `{series_id}`\n"
+
+    if series_description and series_description != "None":
+        adoc_str += f"* **Description:** {series_description}\n"
+    else:
+        adoc_str += "* **Description:** Not available\n"
+
+    if linked_datasets:
+        adoc_str += f"* **Datasets:** {len(linked_datasets)} linked dataset(s) (see section below)\n"
+    else:
+        adoc_str += "* **Datasets:** None\n"
+
+    adoc_str += "\n"
+
     adoc_str += "== Description\n\n"
-    desc = get_description(subject=series, graph=catalog_graph)
-    if desc and desc != "None":
-        adoc_str += desc + "\n\n"
+    if series_description and series_description != "None":
+        adoc_str += series_description + "\n\n"
     else:
         adoc_str += "No description available.\n\n"
 
-    # Themes (concepts linked to datasets in this series)
-    adoc_str += "== Themes\n\n"
-    adoc_str += _build_theme_concept_table_for_series(series=series, catalog_graph=catalog_graph)
+    adoc_str += "== Datasets in Series\n\n"
+    adoc_str += _linked_datasets_table(series, catalog_graph)
 
-    # Overview
     adoc_str += "== Overview\n\n"
-    adoc_str += create_metadata_table(
-        catalog_graph=catalog_graph,
-        resource=series
+    adoc_str += (
+        f"|===\n"
+        f"|Field |Value\n\n"
+        f"|Name |{series_name}\n"
+        f"|ID |`{series_id}`\n"
+        f"|===\n\n"
     )
-    adoc_str += "\n\n"
-
-    # Active datasets
-    adoc_str += "== Datasets in this series\n\n"
-
-    active_dataset_links = []
-    for dataset in catalog_graph.subjects(DCAT.inSeries, series):
-        dataset_id = get_id(dataset, catalog_graph)
-        if dataset_id in deleted_ids:
-            continue
-        active_dataset_links.append(create_local_link(dataset, catalog_graph))
-
-    if active_dataset_links:
-        adoc_str += "\n".join(active_dataset_links) + "\n\n"
-    else:
-        adoc_str += "No active datasets in this series.\n\n"
-
-    # Deleted datasets
-    adoc_str += "== Deleted datasets in this series\n\n"
-
-    if deleted_datasets:
-        adoc_str += "|===\n"
-        adoc_str += "| Name | ID | Deleted at | Description\n\n"
-
-        for item in deleted_datasets:
-            ds_id = str(item.get("id", "")).strip() or "Not available"
-            ds_title = str(item.get("title", "")).strip() or "Not available"
-            ds_deleted_at = str(item.get("deleted_at", "")).strip() or "Not available"
-            ds_description = str(item.get("description", "")).strip() or "Not available"
-
-            adoc_str += f"| {ds_title}\n"
-            adoc_str += f"| `{ds_id}`\n"
-            adoc_str += f"| {ds_deleted_at}\n"
-            adoc_str += f"| {ds_description}\n\n"
-
-        adoc_str += "|===\n\n"
-    else:
-        adoc_str += "No deleted datasets recorded for this series.\n\n"
 
     write_file(
         adoc_str=adoc_str,
         resource=series,
-        output_dir='modules/dataset-series/pages/',
-        catalog_graph=catalog_graph
+        output_dir="modules/dataset-series/pages/",
+        catalog_graph=catalog_graph,
     )
 
     return 1
