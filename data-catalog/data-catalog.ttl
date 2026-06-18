@@ -1,5 +1,6 @@
 @prefix dcat: <http://www.w3.org/ns/dcat#> .
 @prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix dqv: <http://www.w3.org/ns/dqv#> .
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 @prefix sdcdc: <https://www.uuidea.eu/profiles/data-catalog> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
@@ -10,6 +11,15 @@ sdcdc:catalog-main-001 a dcat:Catalog ;
     dcterms:title "AI-EFFECT Data Catalog" ;
     dcat:version "1.0" .
 
+sdcdc:qm-test-001 a dqv:QualityMeasurement ;
+    dqv:computedOn sdcdc:dataset-test-001 ;
+    dqv:isMeasurementOf sdcdc:metric-test-001 ;
+    dqv:value "1.0"^^xsd:float .
+
+sdcdc:concept-test-001 a skos:Concept ;
+    skos:definition "Minimal test concept for validating the new single-catalog pipeline" ;
+    skos:prefLabel "Test Concept 001" .
+
 sdcdc:dataset-test-001 a dcat:Dataset ;
     dcterms:description "Minimal test dataset for validating the new single-catalog pipeline" ;
     dcterms:title "Test Dataset 001" ;
@@ -17,16 +27,16 @@ sdcdc:dataset-test-001 a dcat:Dataset ;
     dcat:theme sdcdc:concept-test-001 ;
     odrl:hasPolicy sdcdc:policy-test-001 .
 
-sdcdc:concept-test-001 a skos:Concept ;
-    skos:definition "Minimal test concept for validating the new single-catalog pipeline" ;
-    skos:prefLabel "Test Concept 001" .
-
 sdcdc:distribution-test-001 a dcat:Distribution ;
     dcterms:description "Minimal test distribution for validating the new single-catalog pipeline" ;
     dcterms:format "csv" ;
     dcterms:issued "2026-05-25"^^xsd:date ;
     dcterms:title "Test Distribution 001" ;
     dcat:accessURL "https://example.com/test-distribution-001.csv" .
+
+sdcdc:metric-test-001 a dqv:Metric ;
+    skos:definition "Minimal test metric for validating the new single-catalog pipeline" ;
+    skos:prefLabel "Test Metric 001" .
 
 sdcdc:policy-test-001 a odrl:Policy ;
     dcterms:description "Minimal test policy for validating the new single-catalog pipeline" ;
@@ -37,5 +47,7 @@ sdcdc:policy-test-001 a odrl:Policy ;
     sdcdc:dataCatalog sdcdc:catalog-main-001 ;
     sdcdc:datasets sdcdc:dataset-test-001 ;
     sdcdc:distributions sdcdc:distribution-test-001 ;
-    sdcdc:policies sdcdc:policy-test-001 .
+    sdcdc:metrics sdcdc:metric-test-001 ;
+    sdcdc:policies sdcdc:policy-test-001 ;
+    sdcdc:qualityMeasurements sdcdc:qm-test-001 .
 

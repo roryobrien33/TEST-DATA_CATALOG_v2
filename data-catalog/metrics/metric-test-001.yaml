@@ -1,0 +1,4 @@
+﻿metric:
+  identifier: sdcdc:metric-test-001
+  prefLabel: Test Metric 001
+  definition: Minimal test metric for validating the new single-catalog pipeline

@@ -20,6 +20,11 @@ DCAT_DISTRIBUTION = URIRef("http://www.w3.org/ns/dcat#distribution")
 DCAT_ACCESS_URL = URIRef("http://www.w3.org/ns/dcat#accessURL")
 ODRL_HAS_POLICY = URIRef("http://www.w3.org/ns/odrl/2/hasPolicy")
 
+DQV_QUALITY_MEASUREMENT = URIRef("http://www.w3.org/ns/dqv#QualityMeasurement")
+DQV_COMPUTED_ON = URIRef("http://www.w3.org/ns/dqv#computedOn")
+DQV_IS_MEASUREMENT_OF = URIRef("http://www.w3.org/ns/dqv#isMeasurementOf")
+DQV_VALUE = URIRef("http://www.w3.org/ns/dqv#value")
+
 
 def _first_literal(graph: Graph, subject: URIRef, predicates):
     for pred in predicates:
@@ -86,6 +91,76 @@ def _linked_policies_table(dataset: URIRef, catalog_graph: Graph) -> str:
     for _, policy_name_display, policy_id in rows:
         table_str += f"| {policy_name_display}\n"
         table_str += f"| `{policy_id}`\n\n"
+
+    table_str += "|===\n\n"
+    return table_str
+
+
+def _linked_metrics_rows(dataset: URIRef, catalog_graph: Graph):
+    rows = []
+
+    for qm in catalog_graph.subjects(RDF.type, DQV_QUALITY_MEASUREMENT):
+        computed_on = list(catalog_graph.objects(qm, DQV_COMPUTED_ON))
+        if dataset not in computed_on:
+            continue
+
+        qm_id = get_id(qm, catalog_graph)
+        qm_value = str(catalog_graph.value(qm, DQV_VALUE) or "").strip()
+        if not qm_value or qm_value == "None":
+            qm_value = "Not available"
+
+        metrics = list(catalog_graph.objects(qm, DQV_IS_MEASUREMENT_OF))
+        if not metrics:
+            rows.append(
+                (
+                    "",
+                    "Unknown metric",
+                    "Not available",
+                    qm_id,
+                    qm_value,
+                )
+            )
+            continue
+
+        for metric in metrics:
+            metric_name = get_prefLabel(metric, catalog_graph)
+            if not metric_name or metric_name == "None":
+                metric_name = get_title(metric, catalog_graph)
+            if not metric_name or metric_name == "None":
+                metric_name = get_id(metric, catalog_graph)
+
+            metric_id = get_id(metric, catalog_graph)
+            metric_link = create_local_link(metric, catalog_graph)
+            metric_name_display = metric_link if metric_link else metric_name
+
+            rows.append(
+                (
+                    metric_name.lower(),
+                    metric_name_display,
+                    metric_id,
+                    qm_id,
+                    qm_value,
+                )
+            )
+
+    rows.sort(key=lambda x: x[0] if x[0] else "")
+    return rows
+
+
+def _linked_metrics_table(dataset: URIRef, catalog_graph: Graph) -> str:
+    rows = _linked_metrics_rows(dataset, catalog_graph)
+
+    if not rows:
+        return "No linked metrics.\n\n"
+
+    table_str = "|===\n"
+    table_str += "| Metric | Metric ID | Measurement ID | Value\n\n"
+
+    for _, metric_name_display, metric_id, qm_id, qm_value in rows:
+        table_str += f"| {metric_name_display}\n"
+        table_str += f"| `{metric_id}`\n"
+        table_str += f"| `{qm_id}`\n"
+        table_str += f"| {qm_value}\n\n"
 
     table_str += "|===\n\n"
     return table_str
@@ -175,6 +250,7 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
 
     linked_distributions = list(catalog_graph.objects(dataset, DCAT_DISTRIBUTION))
     linked_policies = list(catalog_graph.objects(dataset, ODRL_HAS_POLICY))
+    linked_metrics = _linked_metrics_rows(dataset, catalog_graph)
 
     adoc_str += "= " + dataset_name + "\n\n"
 
@@ -209,6 +285,11 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     else:
         adoc_str += "* **Policies:** None\n"
 
+    if linked_metrics:
+        adoc_str += f"* **Metrics:** {len(linked_metrics)} available (see section below)\n"
+    else:
+        adoc_str += "* **Metrics:** None\n"
+
     adoc_str += "\n"
 
     adoc_str += "== Description\n\n"
@@ -224,7 +305,7 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     adoc_str += _linked_policies_table(dataset, catalog_graph)
 
     adoc_str += "== Metrics\n\n"
-    adoc_str += "No linked metrics.\n\n"
+    adoc_str += _linked_metrics_table(dataset, catalog_graph)
 
     adoc_str += "== Distributions\n\n"
     adoc_str += _distribution_table(dataset, catalog_graph)
