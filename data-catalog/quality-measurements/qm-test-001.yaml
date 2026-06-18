@@ -1,0 +1,5 @@
+﻿qualityMeasurement:
+  identifier: sdcdc:qm-test-001
+  computedOn: sdcdc:dataset-test-001
+  isMeasurementOf: sdcdc:metric-test-001
+  value: 1.0

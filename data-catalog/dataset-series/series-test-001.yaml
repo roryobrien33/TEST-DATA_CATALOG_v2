@@ -1,0 +1,4 @@
+﻿datasetSeries:
+  identifier: sdcdc:series-test-001
+  title: Test Dataset Series 001
+  description: Minimal test dataset series for validating the new single-catalog model

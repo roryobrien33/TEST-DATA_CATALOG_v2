@@ -1,0 +1,7 @@
+﻿dataService:
+  identifier: sdcdc:dataservice-test-001
+  title: Test Data Service 001
+  description: Minimal test data service for validating the new single-catalog model
+  endpointURL: https://example.com/api
+  servesDataset:
+    - sdcdc:dataset-test-001

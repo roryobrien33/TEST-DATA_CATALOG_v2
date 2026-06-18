@@ -6,7 +6,7 @@ from simple_data_catalog_generator.create_series_page import create_series_page
 from simple_data_catalog_generator.page_creation_functions import create_nav_header
 from simple_data_catalog_generator.create_dataservice_page import create_dataservice_page
 from simple_data_catalog_generator.create_policy_page import create_policy_page
-from rdflib import Graph, RDF, DCAT, SKOS, Namespace
+from rdflib import Graph, RDF, DCAT, SKOS, Namespace, URIRef
 import os
 
 from pathlib import Path
@@ -54,7 +54,7 @@ def create_data_catalog(catalog_graph: Graph):
     
 
     create_nav_header(page_type= 'Dataset Series')
-    for series in catalog_graph.subjects(RDF.type, DCAT.DatasetSeries):
+    for series in catalog_graph.subjects(RDF.type, URIRef("http://www.w3.org/ns/dcat#DatasetSeries")):
         create_series_page(series=series, catalog_graph=catalog_graph)
 
     create_nav_header(page_type="Data Services")

@@ -1,0 +1,4 @@
+﻿policy:
+  identifier: sdcdc:policy-test-001
+  title: Test Policy 001
+  description: Minimal test policy for validating the new single-catalog pipeline

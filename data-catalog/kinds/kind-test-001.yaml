@@ -1,0 +1,4 @@
+﻿kind:
+  identifier: sdcdc:kind-test-001
+  fn: Test Contact Point 001
+  hasEmail: contact@example.com

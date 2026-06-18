@@ -1,0 +1,7 @@
+﻿distribution:
+  identifier: sdcdc:distribution-test-001
+  title: Test Distribution 001
+  description: Minimal test distribution for validating the new single-catalog pipeline
+  issued: 2026-05-25
+  accessURL: https://example.com/test-distribution-001.csv
+  format: csv

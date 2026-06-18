@@ -1,0 +1,5 @@
+﻿licenseDocument:
+  identifier: sdcdc:license-test-001
+  title: Test License 001
+  description: Minimal test license for validating the new single-catalog model
+  access_url: https://example.com/license

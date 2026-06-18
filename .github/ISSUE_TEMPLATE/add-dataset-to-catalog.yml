@@ -1,5 +1,5 @@
-name: Add dataset to catalog
-description: Add a new dataset to an existing catalog
+name: Add dataset
+description: Add a new dataset to the single-catalog model
 title: "[Add Dataset] "
 labels: ["catalog-add-dataset", "catalog-intake"]
 
@@ -7,47 +7,31 @@ body:
   - type: markdown
     attributes:
       value: |
-        Use this form to add a dataset to an existing catalog.
+        Use this form to add a new dataset to the single-catalog model.
 
-        If linking concepts, policies, or metrics, use existing IDs (comma-separated).
+        The dataset will be created as its own YAML file in:
+        - `data-catalog/datasets/`
 
-        For distributions, use one block per distribution in this format:
+        If distributions are provided, each distribution will be created as its own YAML file in:
+        - `data-catalog/distributions/`
+
+        Distribution blocks format:
 
         Format: csv
         Access URL: https://example.com/data.csv
         Issued: 2026-06-11
 
-        Leave a blank line between distributions.
-
-        Allowed format values:
-        - csv
-        - text
-        - txt
-        - xlsx
-        - xls
-        - json
-        - xml
-        - ttl
-        - rdf
-        - parquet
-        - zip
-        - api
-
-  - type: input
-    id: catalog_id_existing
-    attributes:
-      label: Catalog ID (existing)
-      description: "Required. Use the exact Catalog ID of the existing catalog."
-      placeholder: "A-SF0JMV"
-    validations:
-      required: true
+        Optional additional dataset links should use existing IDs.
 
   - type: input
     id: dataset_identifier
     attributes:
       label: Dataset identifier
-      description: "Required. Short dataset ID or full ID. If you enter a short ID, it will be normalized."
-      placeholder: "test"
+      description: |
+        Required. You can provide:
+        - a full identifier, e.g. `sdcdc:dataset-my-data-ABC123`
+        - or a short identifier/slug, e.g. `my-data`
+      placeholder: "my-data"
     validations:
       required: true
 
@@ -55,8 +39,8 @@ body:
     id: dataset_title
     attributes:
       label: Dataset title
-      description: "Required. Human-readable dataset name."
-      placeholder: "Voltage measurements"
+      description: Required. Human-readable dataset name.
+      placeholder: "Test Dataset 001"
     validations:
       required: true
 
@@ -64,35 +48,62 @@ body:
     id: dataset_description
     attributes:
       label: Dataset description
-      description: "Required. Brief description of the dataset."
-      placeholder: "Distribution grid voltage measurements for feeder A."
+      description: Required. Brief description of the dataset.
+      placeholder: "Minimal dataset for validating the new single-catalog model."
     validations:
       required: true
 
   - type: input
-    id: dataset_use_case
+    id: publisher_ids
     attributes:
-      label: Dataset use case
-      description: "Required. Must match one of the allowed catalog use cases."
-      placeholder: "a-a"
+      label: Publisher IDs (optional, comma-separated)
+      description: Optional. Existing Agent IDs.
+      placeholder: "sdcdc:agent-test-001"
     validations:
-      required: true
+      required: false
 
   - type: input
-    id: location
+    id: contact_point_ids
     attributes:
-      label: Geographical Location (high-level)
-      description: "Required. High-level geographic location."
-      placeholder: "Dublin, Ireland"
+      label: Contact Point IDs (optional, comma-separated)
+      description: Optional. Existing Kind IDs.
+      placeholder: "sdcdc:kind-test-001"
     validations:
-      required: true
+      required: false
+
+  - type: input
+    id: license_ids
+    attributes:
+      label: License IDs (optional, comma-separated)
+      description: Optional. Existing LicenseDocument IDs.
+      placeholder: "sdcdc:license-test-001"
+    validations:
+      required: false
+
+  - type: input
+    id: temporal_ids
+    attributes:
+      label: Period IDs (optional, comma-separated)
+      description: Optional. Existing PeriodOfTime IDs.
+      placeholder: "sdcdc:period-test-001"
+    validations:
+      required: false
+
+  - type: input
+    id: series_ids
+    attributes:
+      label: Dataset Series IDs (optional, comma-separated)
+      description: Optional. Existing DatasetSeries IDs.
+      placeholder: "sdcdc:series-test-001"
+    validations:
+      required: false
 
   - type: input
     id: concept_ids
     attributes:
       label: Concept IDs (optional, comma-separated)
-      description: "Optional. Use existing concept IDs, comma-separated."
-      placeholder: "sdcdc:concept-voltage-2H4KL0, sdcdc:concept-harmonics-7QX1P9"
+      description: Optional. Existing Concept IDs.
+      placeholder: "sdcdc:concept-test-001"
     validations:
       required: false
 
@@ -100,17 +111,8 @@ body:
     id: policy_ids
     attributes:
       label: Policy IDs (optional, comma-separated)
-      description: "Optional. Use existing policy IDs, comma-separated."
-      placeholder: "sdcdc:policy-open-information-policy-7B9QX2"
-    validations:
-      required: false
-
-  - type: input
-    id: metric_ids
-    attributes:
-      label: Metric IDs (optional, comma-separated)
-      description: "Optional. Use existing metric IDs, comma-separated."
-      placeholder: "sdcdc:metric-voltage-quality-5M1ZP8"
+      description: Optional. Existing Policy IDs.
+      placeholder: "sdcdc:policy-test-001"
     validations:
       required: false
 
@@ -124,19 +126,32 @@ body:
         Required fields per block:
         - Format
         - Access URL
+
+        Optional:
         - Issued
+        - Title
+        - Description
 
-        Format:
+        Example:
+
+        Title: CSV distribution
+        Description: Main CSV export
         Format: csv
         Access URL: https://example.com/data.csv
         Issued: 2026-06-11
+
+        Title: API endpoint
+        Format: api
+        Access URL: https://example.com/api/data
       placeholder: |
+        Title: CSV distribution
+        Description: Main CSV export
         Format: csv
         Access URL: https://example.com/data.csv
         Issued: 2026-06-11
 
-        Format: xlsx
-        Access URL: https://example.com/data.xlsx
-        Issued: 2026-06-12
+        Title: API endpoint
+        Format: api
+        Access URL: https://example.com/api/data
     validations:
       required: false
