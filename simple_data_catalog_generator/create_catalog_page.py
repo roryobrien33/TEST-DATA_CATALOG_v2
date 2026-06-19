@@ -18,6 +18,7 @@ DCAT_DATASERVICE = URIRef("http://www.w3.org/ns/dcat#DataService")
 DCAT_THEME = URIRef("http://www.w3.org/ns/dcat#theme")
 DCAT_DISTRIBUTION_PRED = URIRef("http://www.w3.org/ns/dcat#distribution")
 DCAT_INSERIES = URIRef("http://www.w3.org/ns/dcat#inSeries")
+DCAT_ACCESS_URL = URIRef("http://www.w3.org/ns/dcat#accessURL")
 
 ODRL_POLICY = URIRef("http://www.w3.org/ns/odrl/2/Policy")
 ODRL_HAS_POLICY = URIRef("http://www.w3.org/ns/odrl/2/hasPolicy")
@@ -27,14 +28,6 @@ DQV_QUALITY_MEASUREMENT = URIRef("http://www.w3.org/ns/dqv#QualityMeasurement")
 DQV_COMPUTED_ON = URIRef("http://www.w3.org/ns/dqv#computedOn")
 DQV_IS_MEASUREMENT_OF = URIRef("http://www.w3.org/ns/dqv#isMeasurementOf")
 DQV_VALUE = URIRef("http://www.w3.org/ns/dqv#value")
-
-
-def _first_literal(graph: Graph, subject: URIRef, predicates):
-    for pred in predicates:
-        val = graph.value(subject, pred)
-        if val is not None and str(val).strip() and str(val).strip() != "None":
-            return str(val).strip()
-    return ""
 
 
 def _resource_label(resource: URIRef, catalog_graph: Graph) -> str:
@@ -54,6 +47,10 @@ def _resource_link_or_label(resource: URIRef, catalog_graph: Graph) -> str:
     if link:
         return link
     return _resource_label(resource, catalog_graph)
+
+
+def _count_resources(catalog_graph: Graph, rdf_type: URIRef) -> int:
+    return len(list(catalog_graph.subjects(RDF.type, rdf_type)))
 
 
 def _entity_table(
@@ -154,55 +151,35 @@ def _dataset_table(catalog_graph: Graph) -> str:
     return table_str
 
 
-def _concept_table(catalog_graph: Graph) -> str:
+def _series_table(catalog_graph: Graph) -> str:
     rows = []
 
-    for concept in catalog_graph.subjects(RDF.type, SKOS.Concept):
-        concept_name = get_prefLabel(concept, catalog_graph)
-        if not concept_name or concept_name == "None":
-            concept_name = get_title(concept, catalog_graph)
-        if not concept_name or concept_name == "None":
-            concept_name = get_id(concept, catalog_graph)
+    for series in catalog_graph.subjects(RDF.type, DCAT_DATASET_SERIES):
+        series_name = _resource_label(series, catalog_graph)
+        series_display = _resource_link_or_label(series, catalog_graph)
+        series_id = get_id(series, catalog_graph)
+        description = get_description(series, catalog_graph)
 
-        concept_display = create_local_link(concept, catalog_graph) or concept_name
-        concept_id = get_id(concept, catalog_graph)
-        definition = str(catalog_graph.value(concept, SKOS.definition) or "").strip()
+        if not description or description == "None":
+            description = "Not available"
 
-        if not definition or definition == "None":
-            definition = "Not available"
+        dataset_count = len(list(catalog_graph.subjects(DCAT_INSERIES, series)))
 
-        linked_dataset_ids = sorted(
-            {
-                get_id(dataset, catalog_graph)
-                for dataset in catalog_graph.subjects(DCAT_THEME, concept)
-            }
-        )
-
-        linked_count = len(linked_dataset_ids)
-
-        rows.append(
-            (
-                concept_name.lower(),
-                concept_display,
-                concept_id,
-                linked_count,
-                definition,
-            )
-        )
+        rows.append((series_name.lower(), series_display, series_id, dataset_count, description))
 
     if not rows:
-        return "No concepts available.\n\n"
+        return "No dataset series available.\n\n"
 
     rows.sort(key=lambda x: x[0])
 
     table_str = "|===\n"
-    table_str += "| Concept | ID | Linked datasets | Definition\n\n"
+    table_str += "| Series | ID | Datasets | Description\n\n"
 
-    for _, concept_display, concept_id, linked_count, definition in rows:
-        table_str += f"| {concept_display}\n"
-        table_str += f"| `{concept_id}`\n"
-        table_str += f"| {linked_count}\n"
-        table_str += f"| {definition}\n\n"
+    for _, series_display, series_id, dataset_count, description in rows:
+        table_str += f"| {series_display}\n"
+        table_str += f"| `{series_id}`\n"
+        table_str += f"| {dataset_count}\n"
+        table_str += f"| {description}\n\n"
 
     table_str += "|===\n\n"
     return table_str
@@ -216,9 +193,7 @@ def _distribution_table(catalog_graph: Graph) -> str:
         distribution_display = _resource_link_or_label(distribution, catalog_graph)
         distribution_id = get_id(distribution, catalog_graph)
 
-        access_url = str(
-            catalog_graph.value(distribution, URIRef("http://www.w3.org/ns/dcat#accessURL")) or ""
-        ).strip()
+        access_url = str(catalog_graph.value(distribution, DCAT_ACCESS_URL) or "").strip()
         if not access_url or access_url == "None":
             access_url = "Not available"
 
@@ -251,6 +226,67 @@ def _distribution_table(catalog_graph: Graph) -> str:
     return table_str
 
 
+def _concept_table(catalog_graph: Graph) -> str:
+    rows = []
+
+    for concept in catalog_graph.subjects(RDF.type, SKOS.Concept):
+        concept_name = get_prefLabel(concept, catalog_graph)
+        if not concept_name or concept_name == "None":
+            concept_name = get_title(concept, catalog_graph)
+        if not concept_name or concept_name == "None":
+            concept_name = get_id(concept, catalog_graph)
+
+        concept_display = create_local_link(concept, catalog_graph) or concept_name
+        concept_id = get_id(concept, catalog_graph)
+        definition = str(catalog_graph.value(concept, SKOS.definition) or "").strip()
+
+        if not definition or definition == "None":
+            definition = "Not available"
+
+        linked_dataset_ids = sorted(
+            {
+                get_id(dataset, catalog_graph)
+                for dataset in catalog_graph.subjects(DCAT_THEME, concept)
+            }
+        )
+
+        rows.append(
+            (
+                concept_name.lower(),
+                concept_display,
+                concept_id,
+                len(linked_dataset_ids),
+                definition,
+            )
+        )
+
+    if not rows:
+        return "No concepts available.\n\n"
+
+    rows.sort(key=lambda x: x[0])
+
+    table_str = "|===\n"
+    table_str += "| Concept | ID | Linked datasets | Definition\n\n"
+
+    for _, concept_display, concept_id, linked_count, definition in rows:
+        table_str += f"| {concept_display}\n"
+        table_str += f"| `{concept_id}`\n"
+        table_str += f"| {linked_count}\n"
+        table_str += f"| {definition}\n\n"
+
+    table_str += "|===\n\n"
+    return table_str
+
+
+def _policy_table(catalog_graph: Graph) -> str:
+    return _entity_table(
+        catalog_graph=catalog_graph,
+        rdf_type=ODRL_POLICY,
+        entity_label="Policy",
+        include_description=True,
+    )
+
+
 def _metric_table(catalog_graph: Graph) -> str:
     rows = []
 
@@ -268,9 +304,7 @@ def _metric_table(catalog_graph: Graph) -> str:
         if not definition or definition == "None":
             definition = "Not available"
 
-        measurement_count = len(
-            list(catalog_graph.subjects(DQV_IS_MEASUREMENT_OF, metric))
-        )
+        measurement_count = len(list(catalog_graph.subjects(DQV_IS_MEASUREMENT_OF, metric)))
 
         rows.append((metric_name.lower(), metric_display, metric_id, measurement_count, definition))
 
@@ -319,7 +353,17 @@ def _quality_measurement_table(catalog_graph: Graph) -> str:
         if not value or value == "None":
             value = "Not available"
 
-        rows.append((measurement_id.lower(), measurement_id, resource_display, resource_id, metric_display, metric_id, value))
+        rows.append(
+            (
+                measurement_id.lower(),
+                measurement_id,
+                resource_display,
+                resource_id,
+                metric_display,
+                metric_id,
+                value,
+            )
+        )
 
     if not rows:
         return "No quality measurements available.\n\n"
@@ -341,49 +385,6 @@ def _quality_measurement_table(catalog_graph: Graph) -> str:
     return table_str
 
 
-def _series_table(catalog_graph: Graph) -> str:
-    rows = []
-
-    for series in catalog_graph.subjects(RDF.type, DCAT_DATASET_SERIES):
-        series_name = _resource_label(series, catalog_graph)
-        series_display = _resource_link_or_label(series, catalog_graph)
-        series_id = get_id(series, catalog_graph)
-        description = get_description(series, catalog_graph)
-
-        if not description or description == "None":
-            description = "Not available"
-
-        dataset_count = len(list(catalog_graph.subjects(DCAT_INSERIES, series)))
-
-        rows.append((series_name.lower(), series_display, series_id, dataset_count, description))
-
-    if not rows:
-        return "No dataset series available.\n\n"
-
-    rows.sort(key=lambda x: x[0])
-
-    table_str = "|===\n"
-    table_str += "| Series | ID | Datasets | Description\n\n"
-
-    for _, series_display, series_id, dataset_count, description in rows:
-        table_str += f"| {series_display}\n"
-        table_str += f"| `{series_id}`\n"
-        table_str += f"| {dataset_count}\n"
-        table_str += f"| {description}\n\n"
-
-    table_str += "|===\n\n"
-    return table_str
-
-
-def _policy_table(catalog_graph: Graph) -> str:
-    return _entity_table(
-        catalog_graph=catalog_graph,
-        rdf_type=ODRL_POLICY,
-        entity_label="Policy",
-        include_description=True,
-    )
-
-
 def _dataservice_table(catalog_graph: Graph) -> str:
     return _entity_table(
         catalog_graph=catalog_graph,
@@ -391,10 +392,6 @@ def _dataservice_table(catalog_graph: Graph) -> str:
         entity_label="Data service",
         include_description=True,
     )
-
-
-def _count_resources(catalog_graph: Graph, rdf_type: URIRef) -> int:
-    return len(list(catalog_graph.subjects(RDF.type, rdf_type)))
 
 
 def create_catalog_page(catalog_graph: Graph):

@@ -9,7 +9,14 @@ DQV = Namespace("http://www.w3.org/ns/dqv#")
 ADMS = Namespace("http://www.w3.org/ns/adms#")
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 
+DCAT_CATALOG = URIRef("http://www.w3.org/ns/dcat#Catalog")
+DCAT_DATASET = URIRef("http://www.w3.org/ns/dcat#Dataset")
+DCAT_DISTRIBUTION = URIRef("http://www.w3.org/ns/dcat#Distribution")
 DCAT_DATASET_SERIES = URIRef("http://www.w3.org/ns/dcat#DatasetSeries")
+DCAT_DATASERVICE = URIRef("http://www.w3.org/ns/dcat#DataService")
+DQV_METRIC = URIRef("http://www.w3.org/ns/dqv#Metric")
+DQV_QUALITY_MEASUREMENT = URIRef("http://www.w3.org/ns/dqv#QualityMeasurement")
+ODRL_POLICY = URIRef("http://www.w3.org/ns/odrl/2/Policy")
 
 
 def _sanitize_page_id(value: str) -> str:
@@ -50,11 +57,20 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
         if name.startswith("data-catalog"):
             expanded.append(name.replace("data-catalog", "", 1).lstrip("-_/"))
 
+        if "catalog-" in name:
+            expanded.append(name[name.find("catalog-"):])
+
         if "concept-" in name:
             expanded.append(name[name.find("concept-"):])
 
         if "metric-" in name:
             expanded.append(name[name.find("metric-"):])
+
+        if "qm-" in name:
+            expanded.append(name[name.find("qm-"):])
+
+        if "quality-measurement-" in name:
+            expanded.append(name[name.find("quality-measurement-"):])
 
         if "policy-" in name:
             expanded.append(name[name.find("policy-"):])
@@ -67,6 +83,12 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
 
         if "series-" in name:
             expanded.append(name[name.find("series-"):])
+
+        if "dataservice-" in name:
+            expanded.append(name[name.find("dataservice-"):])
+
+        if "data-service-" in name:
+            expanded.append(name[name.find("data-service-"):])
 
     seen = set()
     final_candidates = []
@@ -89,6 +111,24 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
     return ""
 
 
+def _catalog_identifier_from_source_yaml() -> str:
+    path = Path("data-catalog/catalog.yaml")
+    if not path.exists():
+        return ""
+
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+    if "catalog" in doc:
+        catalog = doc.get("catalog", {}) or {}
+    elif "dataCatalog" in doc:
+        catalog = doc.get("dataCatalog", {}) or {}
+    else:
+        catalog = {}
+
+    identifier = str(catalog.get("identifier") or catalog.get("id") or catalog.get("uid") or "").strip()
+    return identifier
+
+
 def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
     return _identifier_from_source_yaml(
         resource=resource,
@@ -103,6 +143,15 @@ def _metric_identifier_from_source_yaml(resource: URIRef) -> str:
         resource=resource,
         entity_dir="metrics",
         yaml_key="metric",
+        id_field="identifier",
+    )
+
+
+def _quality_measurement_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="quality-measurements",
+        yaml_key="qualityMeasurement",
         id_field="identifier",
     )
 
@@ -143,36 +192,53 @@ def _series_identifier_from_source_yaml(resource: URIRef) -> str:
     )
 
 
+def _dataservice_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(
+        resource=resource,
+        entity_dir="data-services",
+        yaml_key="dataService",
+        id_field="identifier",
+    )
+
+
 def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
     page_id = get_page_id(resource=resource, catalog_graph=catalog_graph)
     rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
 
-    if rdf_type == DCAT.Dataset:
+    if rdf_type == DCAT_DATASET:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:dataset:{page_id}.adoc[{title}]"
+
     elif rdf_type == SKOS.Concept:
         pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
         local_link = f"xref:concept:{page_id}.adoc[{pref_label}]"
-    elif rdf_type == DQV.Metric:
+
+    elif rdf_type == DQV_METRIC:
         pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
         if not pref_label or pref_label == "None":
             pref_label = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:metric:{page_id}.adoc[{pref_label}]"
-    elif rdf_type == DCAT.DataService:
+
+    elif rdf_type == DCAT_DATASERVICE:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:dataservice:{page_id}.adoc[{title}]"
+
     elif rdf_type == DCAT_DATASET_SERIES:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:dataset-series:{page_id}.adoc[{title}]"
-    elif rdf_type == DCAT.Catalog:
+
+    elif rdf_type == DCAT_CATALOG:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:data-catalog:{page_id}.adoc[{title}]"
-    elif rdf_type == ODRL.Policy:
+
+    elif rdf_type == ODRL_POLICY:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:policy:{page_id}.adoc[{title}]"
-    elif rdf_type == DCAT.Distribution:
+
+    elif rdf_type == DCAT_DISTRIBUTION:
         title = get_title(subject=resource, graph=catalog_graph)
         local_link = f"xref:distribution:{page_id}.adoc[{title}]"
+
     else:
         local_link = ""
 
@@ -244,11 +310,11 @@ def get_description(subject: URIRef, graph: Graph) -> str:
 
 def get_id(resource: URIRef, catalog_graph: Graph) -> str:
     """
-    Display identifier (full identifier if available).
+    Display identifier.
 
     Priority:
     1. dcterms:identifier from RDF graph
-    2. source YAML fallback for concept / metric / policy / distribution / dataset / series
+    2. source YAML fallback for entity types
     3. URI-derived fallback
     """
     identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
@@ -257,27 +323,37 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
 
     rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
 
+    if rdf_type == DCAT_CATALOG:
+        catalog_identifier = _catalog_identifier_from_source_yaml()
+        if catalog_identifier:
+            return catalog_identifier
+
     if rdf_type == SKOS.Concept:
         concept_identifier = _concept_identifier_from_source_yaml(resource)
         if concept_identifier:
             return concept_identifier
 
-    if rdf_type == DQV.Metric:
+    if rdf_type == DQV_METRIC:
         metric_identifier = _metric_identifier_from_source_yaml(resource)
         if metric_identifier:
             return metric_identifier
 
-    if rdf_type == ODRL.Policy:
+    if rdf_type == DQV_QUALITY_MEASUREMENT:
+        qm_identifier = _quality_measurement_identifier_from_source_yaml(resource)
+        if qm_identifier:
+            return qm_identifier
+
+    if rdf_type == ODRL_POLICY:
         policy_identifier = _policy_identifier_from_source_yaml(resource)
         if policy_identifier:
             return policy_identifier
 
-    if rdf_type == DCAT.Distribution:
+    if rdf_type == DCAT_DISTRIBUTION:
         distribution_identifier = _distribution_identifier_from_source_yaml(resource)
         if distribution_identifier:
             return distribution_identifier
 
-    if rdf_type == DCAT.Dataset:
+    if rdf_type == DCAT_DATASET:
         dataset_identifier = _dataset_identifier_from_source_yaml(resource)
         if dataset_identifier:
             return dataset_identifier
@@ -286,6 +362,11 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
         series_identifier = _series_identifier_from_source_yaml(resource)
         if series_identifier:
             return series_identifier
+
+    if rdf_type == DCAT_DATASERVICE:
+        dataservice_identifier = _dataservice_identifier_from_source_yaml(resource)
+        if dataservice_identifier:
+            return dataservice_identifier
 
     resource_str = str(resource)
 
