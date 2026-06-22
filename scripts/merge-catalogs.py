@@ -18,6 +18,12 @@ ENTITY_SOURCES = {
     "quality-measurements": ("qualityMeasurement", "qualityMeasurements"),
     "data-services": ("dataService", "dataServices"),
     "policies": ("policy", "policies"),
+
+    # Supporting entities now included in merged Container
+    "agents": ("agent", "agents"),
+    "kinds": ("kind", "kinds"),
+    "licenses": ("licenseDocument", "licenseDocuments"),
+    "periods": ("periodOfTime", "periods"),
 }
 
 
@@ -98,6 +104,7 @@ def validate_identifiers(merged):
     catalog_identifier = str(
         catalog_obj.get("identifier") or catalog_obj.get("id") or catalog_obj.get("uid") or ""
     ).strip()
+
     if not catalog_identifier:
         raise ValueError("dataCatalog is missing identifier/id/uid")
 
@@ -107,6 +114,7 @@ def validate_identifiers(merged):
     for section_name, items in merged.items():
         if section_name == "dataCatalog":
             continue
+
         if not isinstance(items, list):
             continue
 
@@ -138,6 +146,8 @@ def build_merged_container():
 
     merged = {
         "dataCatalog": catalog_obj,
+
+        # Core entities
         "datasets": entity_sections.get("datasets", []),
         "concepts": entity_sections.get("concepts", []),
         "series": entity_sections.get("series", []),
@@ -146,6 +156,12 @@ def build_merged_container():
         "qualityMeasurements": entity_sections.get("qualityMeasurements", []),
         "dataServices": entity_sections.get("dataServices", []),
         "policies": entity_sections.get("policies", []),
+
+        # Supporting entities
+        "agents": entity_sections.get("agents", []),
+        "kinds": entity_sections.get("kinds", []),
+        "licenseDocuments": entity_sections.get("licenseDocuments", []),
+        "periods": entity_sections.get("periods", []),
     }
 
     return merged
@@ -172,6 +188,10 @@ def main():
         "qualityMeasurements",
         "dataServices",
         "policies",
+        "agents",
+        "kinds",
+        "licenseDocuments",
+        "periods",
     ):
         counts.append(f"{len(merged.get(key, []))} {key}")
 
