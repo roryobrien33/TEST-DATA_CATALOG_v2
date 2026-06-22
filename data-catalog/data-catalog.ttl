@@ -3,12 +3,11 @@
 @prefix dqv: <http://www.w3.org/ns/dqv#> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-@prefix sdcdc: <https://www.uuidea.eu/profiles/data-catalog> .
+@prefix sdcdc: <https://www.uuidea.eu/profiles/data-catalog/> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
-@prefix vcard: <http://www.w3.org/2006/vcard/ns> .
+@prefix time: <http://www.w3.org/2006/time#> .
+@prefix vcard: <http://www.w3.org/2006/vcard/ns#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-
-sdcdc:agent-test-001 a foaf:Agent .
 
 sdcdc:catalog-main-001 a dcat:Catalog ;
     dcterms:description "Single-catalog structure for the data catalog system" ;
@@ -21,16 +20,19 @@ sdcdc:dataservice-test-001 a dcat:DataService ;
     dcat:endpointURL "https://example.com/api" ;
     dcat:servesDataset sdcdc:dataset-test-001 .
 
-sdcdc:kind-test-001 a vcard:Kind .
-
-sdcdc:license-test-001 a dcterms:LicenseDocument .
-
-sdcdc:period-test-001 a dcterms:PeriodOfTime .
+sdcdc:dataset-test2-4E9PTW a dcat:Dataset ;
+    dcterms:description "test2" ;
+    dcterms:title "test2" .
 
 sdcdc:qm-test-001 a dqv:QualityMeasurement ;
     dqv:computedOn sdcdc:dataset-test-001 ;
     dqv:isMeasurementOf sdcdc:metric-test-001 ;
     dqv:value "1.0"^^xsd:float .
+
+sdcdc:agent-test-001 a foaf:Agent ;
+    dcterms:description "Minimal test agent for validating the new single-catalog pipeline" ;
+    dcterms:title "Test Agent 001" ;
+    foaf:name "Test Agent 001" .
 
 sdcdc:concept-test-001 a skos:Concept ;
     skos:definition "Minimal test concept for validating the new single-catalog pipeline" ;
@@ -43,9 +45,22 @@ sdcdc:distribution-test-001 a dcat:Distribution ;
     dcterms:title "Test Distribution 001" ;
     dcat:accessURL "https://example.com/test-distribution-001.csv" .
 
+sdcdc:kind-test-001 a vcard:Kind ;
+    vcard:fn "Test Contact Point 001" ;
+    vcard:hasEmail "contact@example.com" .
+
+sdcdc:license-test-001 a dcterms:LicenseDocument ;
+    dcterms:description "Minimal test license for validating the new single-catalog model" ;
+    dcterms:title "Test License 001" ;
+    dcat:accessURL "https://example.com/license" .
+
 sdcdc:metric-test-001 a dqv:Metric ;
     skos:definition "Minimal test metric for validating the new single-catalog pipeline" ;
     skos:prefLabel "Test Metric 001" .
+
+sdcdc:period-test-001 a dcterms:PeriodOfTime ;
+    time:hasBeginning "2026-01-01"^^xsd:date ;
+    time:hasEnd "2026-12-31"^^xsd:date .
 
 sdcdc:policy-test-001 a odrl:Policy ;
     dcterms:description "Minimal test policy for validating the new single-catalog pipeline" ;
@@ -68,12 +83,17 @@ sdcdc:dataset-test-001 a dcat:Dataset ;
     odrl:hasPolicy sdcdc:policy-test-001 .
 
 [] a sdcdc:Container ;
+    sdcdc:agents sdcdc:agent-test-001 ;
     sdcdc:concepts sdcdc:concept-test-001 ;
     sdcdc:dataCatalog sdcdc:catalog-main-001 ;
     sdcdc:dataServices sdcdc:dataservice-test-001 ;
-    sdcdc:datasets sdcdc:dataset-test-001 ;
+    sdcdc:datasets sdcdc:dataset-test-001,
+        sdcdc:dataset-test2-4E9PTW ;
     sdcdc:distributions sdcdc:distribution-test-001 ;
+    sdcdc:kinds sdcdc:kind-test-001 ;
+    sdcdc:licenseDocuments sdcdc:license-test-001 ;
     sdcdc:metrics sdcdc:metric-test-001 ;
+    sdcdc:periods sdcdc:period-test-001 ;
     sdcdc:policies sdcdc:policy-test-001 ;
     sdcdc:qualityMeasurements sdcdc:qm-test-001 ;
     sdcdc:series sdcdc:series-test-001 .

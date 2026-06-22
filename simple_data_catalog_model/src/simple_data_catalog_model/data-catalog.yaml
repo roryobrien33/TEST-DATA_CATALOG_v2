@@ -641,3 +641,33 @@ classes:
         inlined: true
         range: Policy
         required: false
+
+      agents:
+        multivalued: true
+        inlined_as_list: true
+        inlined: true
+        range: Agent
+        required: false
+
+      kinds:
+        multivalued: true
+        inlined_as_list: true
+        inlined: true
+        range: Kind
+        required: false
+
+      licenseDocuments:
+        multivalued: true
+        inlined_as_list: true
+        inlined: true
+        range: LicenseDocument
+        required: false
+
+      periods:
+        multivalued: true
+        inlined_as_list: true
+        inlined: true
+        range: PeriodOfTime
+        required: false
+
+  

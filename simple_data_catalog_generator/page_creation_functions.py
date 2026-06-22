@@ -8,15 +8,25 @@ from rdflib import Graph, URIRef, RDF, DCAT, DCTERMS, SKOS, Namespace
 DQV = Namespace("http://www.w3.org/ns/dqv#")
 ADMS = Namespace("http://www.w3.org/ns/adms#")
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
+FOAF = Namespace("http://xmlns.com/foaf/0.1/")
+VCARD = Namespace("http://www.w3.org/2006/vcard/ns#")
 
 DCAT_CATALOG = URIRef("http://www.w3.org/ns/dcat#Catalog")
 DCAT_DATASET = URIRef("http://www.w3.org/ns/dcat#Dataset")
 DCAT_DISTRIBUTION = URIRef("http://www.w3.org/ns/dcat#Distribution")
 DCAT_DATASET_SERIES = URIRef("http://www.w3.org/ns/dcat#DatasetSeries")
 DCAT_DATASERVICE = URIRef("http://www.w3.org/ns/dcat#DataService")
+
 DQV_METRIC = URIRef("http://www.w3.org/ns/dqv#Metric")
 DQV_QUALITY_MEASUREMENT = URIRef("http://www.w3.org/ns/dqv#QualityMeasurement")
+
 ODRL_POLICY = URIRef("http://www.w3.org/ns/odrl/2/Policy")
+
+FOAF_AGENT = URIRef("http://xmlns.com/foaf/0.1/Agent")
+VCARD_KIND = URIRef("http://www.w3.org/2006/vcard/ns#Kind")
+
+DCTERMS_LICENSE_DOCUMENT = URIRef("http://purl.org/dc/terms/LicenseDocument")
+DCTERMS_PERIOD_OF_TIME = URIRef("http://purl.org/dc/terms/PeriodOfTime")
 
 
 def _sanitize_page_id(value: str) -> str:
@@ -39,9 +49,6 @@ def _sanitize_page_id(value: str) -> str:
 
 
 def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: str, id_field: str) -> str:
-    """
-    Generic fallback for identifiers when dcterms:identifier is not present in the RDF graph.
-    """
     resource_str = str(resource)
     candidate_names = []
 
@@ -51,47 +58,36 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
         candidate_names.append(resource_str.rstrip("/").split("/")[-1])
 
     expanded = []
+
     for name in candidate_names:
         expanded.append(name)
 
         if name.startswith("data-catalog"):
             expanded.append(name.replace("data-catalog", "", 1).lstrip("-_/"))
 
-        if "catalog-" in name:
-            expanded.append(name[name.find("catalog-"):])
-
-        if "concept-" in name:
-            expanded.append(name[name.find("concept-"):])
-
-        if "metric-" in name:
-            expanded.append(name[name.find("metric-"):])
-
-        if "qm-" in name:
-            expanded.append(name[name.find("qm-"):])
-
-        if "quality-measurement-" in name:
-            expanded.append(name[name.find("quality-measurement-"):])
-
-        if "policy-" in name:
-            expanded.append(name[name.find("policy-"):])
-
-        if "distribution-" in name:
-            expanded.append(name[name.find("distribution-"):])
-
-        if "dataset-" in name:
-            expanded.append(name[name.find("dataset-"):])
-
-        if "series-" in name:
-            expanded.append(name[name.find("series-"):])
-
-        if "dataservice-" in name:
-            expanded.append(name[name.find("dataservice-"):])
-
-        if "data-service-" in name:
-            expanded.append(name[name.find("data-service-"):])
+        for marker in (
+            "catalog-",
+            "concept-",
+            "metric-",
+            "qm-",
+            "quality-measurement-",
+            "policy-",
+            "distribution-",
+            "dataset-",
+            "series-",
+            "dataservice-",
+            "data-service-",
+            "agent-",
+            "kind-",
+            "license-",
+            "period-",
+        ):
+            if marker in name:
+                expanded.append(name[name.find(marker):])
 
     seen = set()
     final_candidates = []
+
     for c in expanded:
         c = str(c).strip()
         if c and c not in seen:
@@ -104,7 +100,9 @@ def _identifier_from_source_yaml(resource: URIRef, entity_dir: str, yaml_key: st
             if path.exists():
                 doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
                 entity = doc.get(yaml_key, {}) or {}
-                identifier = str(entity.get(id_field, "")).strip()
+                identifier = str(
+                    entity.get(id_field) or entity.get("id") or entity.get("uid") or ""
+                ).strip()
                 if identifier:
                     return identifier
 
@@ -125,80 +123,57 @@ def _catalog_identifier_from_source_yaml() -> str:
     else:
         catalog = {}
 
-    identifier = str(catalog.get("identifier") or catalog.get("id") or catalog.get("uid") or "").strip()
-    return identifier
+    return str(catalog.get("identifier") or catalog.get("id") or catalog.get("uid") or "").strip()
 
 
 def _concept_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="concepts",
-        yaml_key="concept",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "concepts", "concept", "identifier")
 
 
 def _metric_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="metrics",
-        yaml_key="metric",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "metrics", "metric", "identifier")
 
 
 def _quality_measurement_identifier_from_source_yaml(resource: URIRef) -> str:
     return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="quality-measurements",
-        yaml_key="qualityMeasurement",
-        id_field="identifier",
+        resource, "quality-measurements", "qualityMeasurement", "identifier"
     )
 
 
 def _policy_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="policies",
-        yaml_key="policy",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "policies", "policy", "identifier")
 
 
 def _distribution_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="distributions",
-        yaml_key="distribution",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "distributions", "distribution", "identifier")
 
 
 def _dataset_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="datasets",
-        yaml_key="dataset",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "datasets", "dataset", "identifier")
 
 
 def _series_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="dataset-series",
-        yaml_key="datasetSeries",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "dataset-series", "datasetSeries", "identifier")
 
 
 def _dataservice_identifier_from_source_yaml(resource: URIRef) -> str:
-    return _identifier_from_source_yaml(
-        resource=resource,
-        entity_dir="data-services",
-        yaml_key="dataService",
-        id_field="identifier",
-    )
+    return _identifier_from_source_yaml(resource, "data-services", "dataService", "identifier")
+
+
+def _agent_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(resource, "agents", "agent", "identifier")
+
+
+def _kind_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(resource, "kinds", "kind", "identifier")
+
+
+def _license_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(resource, "licenses", "licenseDocument", "identifier")
+
+
+def _period_identifier_from_source_yaml(resource: URIRef) -> str:
+    return _identifier_from_source_yaml(resource, "periods", "periodOfTime", "identifier")
 
 
 def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
@@ -207,42 +182,40 @@ def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
 
     if rdf_type == DCAT_DATASET:
         title = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:dataset:{page_id}.adoc[{title}]"
+        return f"xref:dataset:{page_id}.adoc[{title}]"
 
-    elif rdf_type == SKOS.Concept:
+    if rdf_type == SKOS.Concept:
         pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
-        local_link = f"xref:concept:{page_id}.adoc[{pref_label}]"
+        return f"xref:concept:{page_id}.adoc[{pref_label}]"
 
-    elif rdf_type == DQV_METRIC:
+    if rdf_type == DQV_METRIC:
         pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
         if not pref_label or pref_label == "None":
             pref_label = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:metric:{page_id}.adoc[{pref_label}]"
+        return f"xref:metric:{page_id}.adoc[{pref_label}]"
 
-    elif rdf_type == DCAT_DATASERVICE:
+    if rdf_type == DCAT_DATASERVICE:
         title = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:dataservice:{page_id}.adoc[{title}]"
+        return f"xref:dataservice:{page_id}.adoc[{title}]"
 
-    elif rdf_type == DCAT_DATASET_SERIES:
+    if rdf_type == DCAT_DATASET_SERIES:
         title = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:dataset-series:{page_id}.adoc[{title}]"
+        return f"xref:dataset-series:{page_id}.adoc[{title}]"
 
-    elif rdf_type == DCAT_CATALOG:
+    if rdf_type == DCAT_CATALOG:
         title = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:data-catalog:{page_id}.adoc[{title}]"
+        return f"xref:data-catalog:{page_id}.adoc[{title}]"
 
-    elif rdf_type == ODRL_POLICY:
+    if rdf_type == ODRL_POLICY:
         title = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:policy:{page_id}.adoc[{title}]"
+        return f"xref:policy:{page_id}.adoc[{title}]"
 
-    elif rdf_type == DCAT_DISTRIBUTION:
+    if rdf_type == DCAT_DISTRIBUTION:
         title = get_title(subject=resource, graph=catalog_graph)
-        local_link = f"xref:distribution:{page_id}.adoc[{title}]"
+        return f"xref:distribution:{page_id}.adoc[{title}]"
 
-    else:
-        local_link = ""
-
-    return local_link
+    # Supporting entities can be displayed as IDs/names for now.
+    return ""
 
 
 def write_file(adoc_str: str, resource: URIRef, output_dir: str, catalog_graph: Graph) -> None:
@@ -250,6 +223,7 @@ def write_file(adoc_str: str, resource: URIRef, output_dir: str, catalog_graph: 
     output_path = os.path.join(output_dir, file_name + ".adoc")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(adoc_str)
 
@@ -281,13 +255,23 @@ def get_title(subject: URIRef, graph: Graph) -> str:
     title_str = str(title)
 
     if title_str == "None" or not title_str.strip():
+        name = graph.value(subject, FOAF.name)
+        name_str = str(name)
+        if name_str != "None" and name_str.strip():
+            return name_str.strip()
+
+        fn = graph.value(subject, VCARD.fn)
+        fn_str = str(fn)
+        if fn_str != "None" and fn_str.strip():
+            return fn_str.strip()
+
         pref_label = str(graph.value(subject, SKOS.prefLabel))
         if pref_label != "None" and pref_label.strip():
             return pref_label.strip()
 
         subject_str = str(subject)
         if "#" in subject_str:
-            title_str = subject_str.split("#")[1]
+            title_str = subject_str.split("#")[-1]
         elif "/" in subject_str:
             title_str = subject_str.rstrip("/").split("/")[-1]
         else:
@@ -298,25 +282,15 @@ def get_title(subject: URIRef, graph: Graph) -> str:
 
 def get_status(subject: URIRef, graph: Graph) -> str:
     title = graph.value(subject, ADMS.status)
-    title_str = str(title)
-    return title_str
+    return str(title)
 
 
 def get_description(subject: URIRef, graph: Graph) -> str:
     description = graph.value(subject, DCTERMS.description)
-    description_str = str(description)
-    return description_str
+    return str(description)
 
 
 def get_id(resource: URIRef, catalog_graph: Graph) -> str:
-    """
-    Display identifier.
-
-    Priority:
-    1. dcterms:identifier from RDF graph
-    2. source YAML fallback for entity types
-    3. URI-derived fallback
-    """
     identifier = str(catalog_graph.value(URIRef(resource), DCTERMS.identifier))
     if identifier != "None" and identifier.strip():
         return identifier.strip()
@@ -324,54 +298,74 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
     rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
 
     if rdf_type == DCAT_CATALOG:
-        catalog_identifier = _catalog_identifier_from_source_yaml()
-        if catalog_identifier:
-            return catalog_identifier
+        value = _catalog_identifier_from_source_yaml()
+        if value:
+            return value
 
     if rdf_type == SKOS.Concept:
-        concept_identifier = _concept_identifier_from_source_yaml(resource)
-        if concept_identifier:
-            return concept_identifier
+        value = _concept_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == DQV_METRIC:
-        metric_identifier = _metric_identifier_from_source_yaml(resource)
-        if metric_identifier:
-            return metric_identifier
+        value = _metric_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == DQV_QUALITY_MEASUREMENT:
-        qm_identifier = _quality_measurement_identifier_from_source_yaml(resource)
-        if qm_identifier:
-            return qm_identifier
+        value = _quality_measurement_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == ODRL_POLICY:
-        policy_identifier = _policy_identifier_from_source_yaml(resource)
-        if policy_identifier:
-            return policy_identifier
+        value = _policy_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == DCAT_DISTRIBUTION:
-        distribution_identifier = _distribution_identifier_from_source_yaml(resource)
-        if distribution_identifier:
-            return distribution_identifier
+        value = _distribution_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == DCAT_DATASET:
-        dataset_identifier = _dataset_identifier_from_source_yaml(resource)
-        if dataset_identifier:
-            return dataset_identifier
+        value = _dataset_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == DCAT_DATASET_SERIES:
-        series_identifier = _series_identifier_from_source_yaml(resource)
-        if series_identifier:
-            return series_identifier
+        value = _series_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     if rdf_type == DCAT_DATASERVICE:
-        dataservice_identifier = _dataservice_identifier_from_source_yaml(resource)
-        if dataservice_identifier:
-            return dataservice_identifier
+        value = _dataservice_identifier_from_source_yaml(resource)
+        if value:
+            return value
+
+    if rdf_type == FOAF_AGENT:
+        value = _agent_identifier_from_source_yaml(resource)
+        if value:
+            return value
+
+    if rdf_type == VCARD_KIND:
+        value = _kind_identifier_from_source_yaml(resource)
+        if value:
+            return value
+
+    if rdf_type == DCTERMS_LICENSE_DOCUMENT:
+        value = _license_identifier_from_source_yaml(resource)
+        if value:
+            return value
+
+    if rdf_type == DCTERMS_PERIOD_OF_TIME:
+        value = _period_identifier_from_source_yaml(resource)
+        if value:
+            return value
 
     resource_str = str(resource)
 
     if "#" in resource_str:
-        identifier = resource_str.split("#")[1]
+        identifier = resource_str.split("#")[-1]
     elif "/" in resource_str:
         identifier = resource_str.rstrip("/").split("/")[-1]
     else:
@@ -381,9 +375,6 @@ def get_id(resource: URIRef, catalog_graph: Graph) -> str:
 
 
 def get_page_id(resource: URIRef, catalog_graph: Graph) -> str:
-    """
-    Safe file/xref target id. This should be used for filenames and xrefs.
-    """
     display_id = get_id(resource=resource, catalog_graph=catalog_graph)
     return _sanitize_page_id(display_id)
 
