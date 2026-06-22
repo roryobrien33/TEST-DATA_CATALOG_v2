@@ -175,7 +175,6 @@ def _license_identifier_from_source_yaml(resource: URIRef) -> str:
 def _period_identifier_from_source_yaml(resource: URIRef) -> str:
     return _identifier_from_source_yaml(resource, "periods", "periodOfTime", "identifier")
 
-
 def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
     page_id = get_page_id(resource=resource, catalog_graph=catalog_graph)
     rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
@@ -214,9 +213,23 @@ def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
         title = get_title(subject=resource, graph=catalog_graph)
         return f"xref:distribution:{page_id}.adoc[{title}]"
 
-    # Supporting entities can be displayed as IDs/names for now.
-    return ""
+    if rdf_type == FOAF_AGENT:
+        title = get_title(subject=resource, graph=catalog_graph)
+        return f"xref:agent:{page_id}.adoc[{title}]"
 
+    if rdf_type == VCARD_KIND:
+        title = get_title(subject=resource, graph=catalog_graph)
+        return f"xref:kind:{page_id}.adoc[{title}]"
+
+    if rdf_type == DCTERMS_LICENSE_DOCUMENT:
+        title = get_title(subject=resource, graph=catalog_graph)
+        return f"xref:license:{page_id}.adoc[{title}]"
+
+    if rdf_type == DCTERMS_PERIOD_OF_TIME:
+        period_id = get_id(resource=resource, catalog_graph=catalog_graph)
+        return f"xref:period:{page_id}.adoc[{period_id}]"
+
+    return ""
 
 def write_file(adoc_str: str, resource: URIRef, output_dir: str, catalog_graph: Graph) -> None:
     file_name = get_page_id(resource=resource, catalog_graph=catalog_graph)
