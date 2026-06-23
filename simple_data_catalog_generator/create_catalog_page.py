@@ -29,6 +29,11 @@ DQV_COMPUTED_ON = URIRef("http://www.w3.org/ns/dqv#computedOn")
 DQV_IS_MEASUREMENT_OF = URIRef("http://www.w3.org/ns/dqv#isMeasurementOf")
 DQV_VALUE = URIRef("http://www.w3.org/ns/dqv#value")
 
+FOAF_AGENT = URIRef("http://xmlns.com/foaf/0.1/Agent")
+VCARD_KIND = URIRef("http://www.w3.org/2006/vcard/ns#Kind")
+DCTERMS_LICENSE_DOCUMENT = URIRef("http://purl.org/dc/terms/LicenseDocument")
+DCTERMS_PERIOD_OF_TIME = URIRef("http://purl.org/dc/terms/PeriodOfTime")
+
 
 def _resource_label(resource: URIRef, catalog_graph: Graph) -> str:
     title = get_title(resource, catalog_graph)
@@ -394,6 +399,42 @@ def _dataservice_table(catalog_graph: Graph) -> str:
     )
 
 
+def _agent_table(catalog_graph: Graph) -> str:
+    return _entity_table(
+        catalog_graph=catalog_graph,
+        rdf_type=FOAF_AGENT,
+        entity_label="Agent",
+        include_description=True,
+    )
+
+
+def _kind_table(catalog_graph: Graph) -> str:
+    return _entity_table(
+        catalog_graph=catalog_graph,
+        rdf_type=VCARD_KIND,
+        entity_label="Contact point",
+        include_description=True,
+    )
+
+
+def _license_table(catalog_graph: Graph) -> str:
+    return _entity_table(
+        catalog_graph=catalog_graph,
+        rdf_type=DCTERMS_LICENSE_DOCUMENT,
+        entity_label="License",
+        include_description=True,
+    )
+
+
+def _period_table(catalog_graph: Graph) -> str:
+    return _entity_table(
+        catalog_graph=catalog_graph,
+        rdf_type=DCTERMS_PERIOD_OF_TIME,
+        entity_label="Period",
+        include_description=True,
+    )
+
+
 def create_catalog_page(catalog_graph: Graph):
     catalogs = list(catalog_graph.subjects(RDF.type, DCAT_CATALOG))
 
@@ -432,6 +473,10 @@ def create_catalog_page(catalog_graph: Graph):
     adoc_str += f"| Metrics | {_count_resources(catalog_graph, DQV_METRIC)}\n"
     adoc_str += f"| Quality measurements | {_count_resources(catalog_graph, DQV_QUALITY_MEASUREMENT)}\n"
     adoc_str += f"| Data services | {_count_resources(catalog_graph, DCAT_DATASERVICE)}\n"
+    adoc_str += f"| Agents | {_count_resources(catalog_graph, FOAF_AGENT)}\n"
+    adoc_str += f"| Contact points | {_count_resources(catalog_graph, VCARD_KIND)}\n"
+    adoc_str += f"| Licenses | {_count_resources(catalog_graph, DCTERMS_LICENSE_DOCUMENT)}\n"
+    adoc_str += f"| Periods | {_count_resources(catalog_graph, DCTERMS_PERIOD_OF_TIME)}\n"
     adoc_str += "|===\n\n"
 
     adoc_str += "== Datasets\n\n"
@@ -457,6 +502,18 @@ def create_catalog_page(catalog_graph: Graph):
 
     adoc_str += "== Data Services\n\n"
     adoc_str += _dataservice_table(catalog_graph)
+
+    adoc_str += "== Agents\n\n"
+    adoc_str += _agent_table(catalog_graph)
+
+    adoc_str += "== Contact Points\n\n"
+    adoc_str += _kind_table(catalog_graph)
+
+    adoc_str += "== Licenses\n\n"
+    adoc_str += _license_table(catalog_graph)
+
+    adoc_str += "== Periods\n\n"
+    adoc_str += _period_table(catalog_graph)
 
     write_file(
         adoc_str=adoc_str,
