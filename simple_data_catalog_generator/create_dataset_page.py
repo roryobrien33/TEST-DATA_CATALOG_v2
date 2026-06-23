@@ -57,6 +57,27 @@ def _literal(graph: Graph, subject: URIRef, predicate: URIRef, default: str = "N
     return val_str
 
 
+def _best_resource_name(resource: URIRef, catalog_graph: Graph) -> str:
+    resource_name = get_title(resource, catalog_graph)
+
+    if not resource_name or resource_name == "None":
+        resource_name = get_prefLabel(resource, catalog_graph)
+
+    if not resource_name or resource_name == "None":
+        resource_name = _literal(catalog_graph, resource, VCARD_FN, default="")
+
+    if not resource_name or resource_name == "None":
+        resource_name = get_id(resource, catalog_graph)
+
+    return resource_name
+
+
+def _resource_display(resource: URIRef, catalog_graph: Graph) -> str:
+    resource_name = _best_resource_name(resource, catalog_graph)
+    resource_link = create_local_link(resource, catalog_graph)
+    return resource_link if resource_link else resource_name
+
+
 def _linked_resource_table(
     subject: URIRef,
     predicate: URIRef,
@@ -66,15 +87,9 @@ def _linked_resource_table(
     rows = []
 
     for resource in catalog_graph.objects(subject, predicate):
-        resource_name = get_title(resource, catalog_graph)
-        if not resource_name or resource_name == "None":
-            resource_name = get_prefLabel(resource, catalog_graph)
-        if not resource_name or resource_name == "None":
-            resource_name = get_id(resource, catalog_graph)
-
+        resource_name = _best_resource_name(resource, catalog_graph)
         resource_id = get_id(resource, catalog_graph)
-        resource_link = create_local_link(resource, catalog_graph)
-        resource_display = resource_link if resource_link else resource_name
+        resource_display = _resource_display(resource, catalog_graph)
 
         rows.append((resource_name.lower(), resource_display, resource_id))
 
@@ -99,8 +114,10 @@ def _linked_concepts_table(dataset: URIRef, catalog_graph: Graph) -> str:
 
     for concept in catalog_graph.objects(dataset, DCAT_THEME):
         concept_name = get_prefLabel(concept, catalog_graph)
+
         if not concept_name or concept_name == "None":
             concept_name = get_title(concept, catalog_graph)
+
         if not concept_name or concept_name == "None":
             concept_name = get_id(concept, catalog_graph)
 
@@ -148,13 +165,9 @@ def _license_table(dataset: URIRef, catalog_graph: Graph) -> str:
     rows = []
 
     for license_resource in catalog_graph.objects(dataset, DCTERMS_LICENSE):
-        license_name = get_title(license_resource, catalog_graph)
-        if not license_name or license_name == "None":
-            license_name = get_id(license_resource, catalog_graph)
-
+        license_name = _best_resource_name(license_resource, catalog_graph)
         license_id = get_id(license_resource, catalog_graph)
-        license_link = create_local_link(license_resource, catalog_graph)
-        license_display = license_link if license_link else license_name
+        license_display = _resource_display(license_resource, catalog_graph)
 
         description = get_description(license_resource, catalog_graph)
         if not description or description == "None":
@@ -196,18 +209,14 @@ def _contact_point_table(dataset: URIRef, catalog_graph: Graph) -> str:
     rows = []
 
     for contact in catalog_graph.objects(dataset, VCARD_CONTACT_POINT):
-        contact_name = _literal(catalog_graph, contact, VCARD_FN, default="")
-        if not contact_name:
-            contact_name = get_title(contact, catalog_graph)
-        if not contact_name or contact_name == "None":
-            contact_name = get_id(contact, catalog_graph)
-
+        contact_name = _best_resource_name(contact, catalog_graph)
         contact_id = get_id(contact, catalog_graph)
+        contact_display = _resource_display(contact, catalog_graph)
 
         email = _literal(catalog_graph, contact, VCARD_HAS_EMAIL)
         url = _literal(catalog_graph, contact, VCARD_HAS_URL)
 
-        rows.append((contact_name.lower(), contact_name, contact_id, email, url))
+        rows.append((contact_name.lower(), contact_display, contact_id, email, url))
 
     if not rows:
         return "No linked contact points.\n\n"
@@ -217,7 +226,7 @@ def _contact_point_table(dataset: URIRef, catalog_graph: Graph) -> str:
     table_str = "|===\n"
     table_str += "| Contact point | ID | Email | URL\n\n"
 
-    for _, contact_name, contact_id, email, url in rows:
+    for _, contact_display, contact_id, email, url in rows:
         if email != "Not available" and email.startswith("mailto:"):
             email_cell = f"link:{email}[{email.replace('mailto:', '')}]"
         elif email != "Not available":
@@ -230,7 +239,7 @@ def _contact_point_table(dataset: URIRef, catalog_graph: Graph) -> str:
         else:
             url_cell = "Not available"
 
-        table_str += f"| {contact_name}\n"
+        table_str += f"| {contact_display}\n"
         table_str += f"| `{contact_id}`\n"
         table_str += f"| {email_cell}\n"
         table_str += f"| {url_cell}\n\n"
@@ -243,7 +252,9 @@ def _temporal_table(dataset: URIRef, catalog_graph: Graph) -> str:
     rows = []
 
     for period in catalog_graph.objects(dataset, DCTERMS_TEMPORAL):
+        period_name = _best_resource_name(period, catalog_graph)
         period_id = get_id(period, catalog_graph)
+        period_display = _resource_display(period, catalog_graph)
 
         beginning = _literal(
             graph=catalog_graph,
@@ -259,7 +270,7 @@ def _temporal_table(dataset: URIRef, catalog_graph: Graph) -> str:
             default="Not available",
         )
 
-        rows.append((period_id.lower(), period_id, beginning, end))
+        rows.append((period_name.lower(), period_display, period_id, beginning, end))
 
     if not rows:
         return "No temporal coverage available.\n\n"
@@ -267,9 +278,10 @@ def _temporal_table(dataset: URIRef, catalog_graph: Graph) -> str:
     rows.sort(key=lambda x: x[0])
 
     table_str = "|===\n"
-    table_str += "| Period | Start | End\n\n"
+    table_str += "| Period | ID | Start | End\n\n"
 
-    for _, period_id, beginning, end in rows:
+    for _, period_display, period_id, beginning, end in rows:
+        table_str += f"| {period_display}\n"
         table_str += f"| `{period_id}`\n"
         table_str += f"| {beginning}\n"
         table_str += f"| {end}\n\n"
@@ -296,8 +308,10 @@ def _linked_metrics_rows(dataset: URIRef, catalog_graph: Graph):
 
         for metric in metrics:
             metric_name = get_prefLabel(metric, catalog_graph)
+
             if not metric_name or metric_name == "None":
                 metric_name = get_title(metric, catalog_graph)
+
             if not metric_name or metric_name == "None":
                 metric_name = get_id(metric, catalog_graph)
 
@@ -350,7 +364,7 @@ def _distribution_table(dataset: URIRef, catalog_graph: Graph) -> str:
 
         access_url = _literal(catalog_graph, distribution, DCAT_ACCESS_URL)
         dist_format = _literal(catalog_graph, distribution, DCTERMS.format)
-        dist_issued = _literal(catalog_graph, distribution, DCTERMS.issued, default="–")
+        dist_issued = _literal(catalog_graph, distribution, DCTERMS.issued, default="-")
 
         rows.append(
             (
@@ -397,6 +411,7 @@ def create_dataset_page(dataset: URIRef, catalog_graph: Graph):
     linked_series = catalog_graph.value(dataset, DCAT_IN_SERIES)
     linked_series_id = ""
     linked_series_link = ""
+
     if linked_series is not None:
         linked_series_id = get_id(linked_series, catalog_graph)
         linked_series_link = create_local_link(linked_series, catalog_graph)
