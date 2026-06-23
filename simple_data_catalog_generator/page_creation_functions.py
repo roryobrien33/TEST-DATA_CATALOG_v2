@@ -175,61 +175,77 @@ def _license_identifier_from_source_yaml(resource: URIRef) -> str:
 def _period_identifier_from_source_yaml(resource: URIRef) -> str:
     return _identifier_from_source_yaml(resource, "periods", "periodOfTime", "identifier")
 
+
+def _best_link_label(resource: URIRef, catalog_graph: Graph) -> str:
+    title = get_title(subject=resource, graph=catalog_graph)
+    if title and title != "None":
+        return title
+
+    pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
+    if pref_label and pref_label != "None":
+        return pref_label
+
+    identifier = get_id(resource=resource, catalog_graph=catalog_graph)
+    if identifier and identifier != "None":
+        return identifier
+
+    return str(resource)
+
+
 def create_local_link(resource: URIRef, catalog_graph: Graph) -> str:
     page_id = get_page_id(resource=resource, catalog_graph=catalog_graph)
     rdf_type = catalog_graph.value(subject=resource, predicate=RDF.type)
 
     if rdf_type == DCAT_DATASET:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:dataset:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:dataset:{page_id}.adoc[{label}]"
 
     if rdf_type == SKOS.Concept:
-        pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
-        return f"xref:concept:{page_id}.adoc[{pref_label}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:concept:{page_id}.adoc[{label}]"
 
     if rdf_type == DQV_METRIC:
-        pref_label = get_prefLabel(subject=resource, graph=catalog_graph)
-        if not pref_label or pref_label == "None":
-            pref_label = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:metric:{page_id}.adoc[{pref_label}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:metric:{page_id}.adoc[{label}]"
 
     if rdf_type == DCAT_DATASERVICE:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:dataservice:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:dataservice:{page_id}.adoc[{label}]"
 
     if rdf_type == DCAT_DATASET_SERIES:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:dataset-series:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:dataset-series:{page_id}.adoc[{label}]"
 
     if rdf_type == DCAT_CATALOG:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:data-catalog:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:data-catalog:{page_id}.adoc[{label}]"
 
     if rdf_type == ODRL_POLICY:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:policy:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:policy:{page_id}.adoc[{label}]"
 
     if rdf_type == DCAT_DISTRIBUTION:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:distribution:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:distribution:{page_id}.adoc[{label}]"
 
     if rdf_type == FOAF_AGENT:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:agent:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:agent:{page_id}.adoc[{label}]"
 
     if rdf_type == VCARD_KIND:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:kind:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:kind:{page_id}.adoc[{label}]"
 
     if rdf_type == DCTERMS_LICENSE_DOCUMENT:
-        title = get_title(subject=resource, graph=catalog_graph)
-        return f"xref:license:{page_id}.adoc[{title}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:license:{page_id}.adoc[{label}]"
 
     if rdf_type == DCTERMS_PERIOD_OF_TIME:
-        period_id = get_id(resource=resource, catalog_graph=catalog_graph)
-        return f"xref:period:{page_id}.adoc[{period_id}]"
+        label = _best_link_label(resource, catalog_graph)
+        return f"xref:period:{page_id}.adoc[{label}]"
 
     return ""
+
 
 def write_file(adoc_str: str, resource: URIRef, output_dir: str, catalog_graph: Graph) -> None:
     file_name = get_page_id(resource=resource, catalog_graph=catalog_graph)
